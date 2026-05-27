@@ -1,19 +1,28 @@
 import { useState, useEffect } from "react";
 
 /* =========================================================
-   SCOUT — Sourcing Engine v3.1
-   v3.1 adds:
-     - PARALLEL LLM mode (Groq + Gemini fired simultaneously,
-       results merged: arrays unioned, numbers averaged,
-       longer strings preferred, outreach shows dual drafts)
-     - Provenance badge on JD + Market results showing which
-       LLM(s) contributed
-     - GitLab as a real profile source (public REST API)
-     - Sharper India X-Ray dorks: Foundit, Instahyre, AmbitionBox,
-       GitLab, Medium engineers
+   SCOUT — Sourcing Engine v3.3
+   v3.3 adds:
+     - Role-family selector (Tech / Sales-GTM / Marketing /
+       Founder-Startup / Product / Design / Ops-HR-Finance)
+     - Non-tech X-Ray dorks: RepVue + Bravado + Sales Hacker
+       (sales), Wellfound + Crunchbase + YC (founders),
+       Appworks + Sequoia Surge + Techstars + 500 + Antler
+       (accelerators), Substack + Medium + MarketingProfs
+       (marketing), MtP + Lenny + Read.cv + Product Hunt
+       (product), Dribbble + Behance + Figma + Awwwards
+       (design), AmbitionBox + Naukri + Foundit + Glassdoor
+       (universal IN non-tech)
+     - Source buttons now render dynamically based on family
+   v3.2: India-tuned bias scorer (PoSH/Maternity/PwD),
+       JD GENERATE mode with company template, fixed X-Ray
+       RUN buttons on all variants, native platform links,
+       backslash-escape stripping for Google links
+   v3.1: PARALLEL LLM mode (Promise.allSettled merge),
+       provenance badges, dual outreach drafts, GitLab,
+       sharper India X-Ray dorks
    v3.0 base: Gemini fallback, country selector (IN default),
-       salary intel, editable context, social handles + feed,
-       AROUND/range/site/filetype boolean variants, runtime keys
+       salary intel, editable context, social handles + feed
    ========================================================= */
 
 const ENV_GROQ = import.meta.env?.VITE_GROQ_KEY || "";
@@ -38,6 +47,60 @@ const COUNTRIES = [
   { code: "AU", name: "Australia", currency: "AUD", default_loc: "Sydney, Australia" },
   { code: "GLOBAL", name: "Global", currency: "USD", default_loc: "" },
 ];
+
+/* ============== ROLE FAMILIES (v3.3 — non-tech sourcing) ==============
+   Each family controls which Profile Finder sources are shown and which X-Ray
+   dork sets get generated. Tech-only sources (GitHub, GitLab, StackOverflow)
+   are useless for sales/marketing/ops talent — they don't live there.
+   Non-tech talent lives on: LinkedIn (via X-Ray), niche communities (RepVue,
+   Substack, Dribbble, etc.), accelerator alumni pages, and India job sites
+   (AmbitionBox, Naukri, Foundit, Instahyre).
+
+   New X-Ray source keys handled in findProfiles:
+   - xray-sales        Sales/SDR/AE/RevOps (RepVue, Bravado, Sales Hacker)
+   - xray-startup      Founders/early employees (Wellfound, Crunchbase, YC)
+   - xray-accelerator  Specific accelerator alumni (Appworks, YC, Surge, Techstars, 500)
+   - xray-marketing    Content/Brand/Growth (Substack, Medium, MarketingProfs, Reforge)
+   - xray-product      PM/PMM (Mind the Product, Lenny, Read.cv, Product Hunt)
+   - xray-design       UX/UI/Product Design (Dribbble, Behance, Read.cv, Awwwards)
+   - xray-india-jobsites  Universal IN non-tech (AmbitionBox, Naukri, Foundit, Glassdoor) */
+const ROLE_FAMILIES = {
+  tech: {
+    label: "TECH",
+    desc: "Engineering, data, infra, security",
+    sources: ["github", "gitlab", "stackoverflow", "hackernews", "xray-linkedin", "xray-github"],
+  },
+  sales_gtm: {
+    label: "SALES / GTM",
+    desc: "AE, SDR, sales mgr, RevOps, GTM",
+    sources: ["xray-linkedin", "xray-sales", "xray-india-jobsites"],
+  },
+  marketing: {
+    label: "MARKETING",
+    desc: "Content, brand, growth, PMM",
+    sources: ["xray-linkedin", "xray-marketing", "xray-india-jobsites"],
+  },
+  founder: {
+    label: "FOUNDER / STARTUP",
+    desc: "Ex-founders, early employees, operators",
+    sources: ["xray-linkedin", "xray-startup", "xray-accelerator"],
+  },
+  product: {
+    label: "PRODUCT",
+    desc: "PM, PMM, product ops",
+    sources: ["xray-linkedin", "xray-product", "xray-india-jobsites"],
+  },
+  design: {
+    label: "DESIGN",
+    desc: "UX, UI, product design",
+    sources: ["xray-linkedin", "xray-design"],
+  },
+  operations: {
+    label: "OPS / HR / FIN",
+    desc: "Operations, HR, finance, admin",
+    sources: ["xray-linkedin", "xray-india-jobsites"],
+  },
+};
 
 const T = {
   bg: "#05080F", bg2: "#080C17", bg3: "#0C1322",
@@ -302,6 +365,13 @@ export default function App() {
 
   const [country, setCountry] = useState(() => getStoredKey("country") || "IN");
   function changeCountry(c) { setCountry(c); setStoredKey("country", c); }
+  function changeRoleFamily(rf) {
+    setRoleFamily(rf);
+    setStoredKey("role_family", rf);
+    /* Auto-switch to the first source of the new family if current source is not in it */
+    const fam = ROLE_FAMILIES[rf];
+    if (fam && !fam.sources.includes(profSrc)) setProfSrc(fam.sources[0]);
+  }
   const countryObj = COUNTRIES.find((c) => c.code === country) || COUNTRIES[0];
 
   const [ctx, setCtx] = useState({
@@ -319,6 +389,21 @@ export default function App() {
   const [jdLoading, setJdLoading] = useState(false);
   const [jdResult, setJdResult] = useState(null);
   const [jdError, setJdError] = useState("");
+  const [biasResult, setBiasResult] = useState(null);
+  const [biasLoading, setBiasLoading] = useState(false);
+  /* JD GENERATE mode — produces a full JD from a short brief, optionally mimicking
+     a company template (one of your existing JDs) stored once in Settings. The
+     generated JD then flows into the standard analyse pipeline so ctx propagates
+     to Profile Finder / Market / Outreach automatically. */
+  const [jdTemplate, setJdTemplate] = useState(() => getStoredKey("jd_template") || "");
+  const [briefRole, setBriefRole] = useState("");
+  const [briefSeniority, setBriefSeniority] = useState("");
+  const [briefExp, setBriefExp] = useState("");
+  const [briefLocation, setBriefLocation] = useState("");
+  const [briefSkills, setBriefSkills] = useState("");
+  const [briefTeam, setBriefTeam] = useState("");
+  const [briefNotes, setBriefNotes] = useState("");
+  const [generateLoading, setGenerateLoading] = useState(false);
 
   /* Profile Finder */
   const [profQuery, setProfQuery] = useState("");
@@ -327,6 +412,10 @@ export default function App() {
   const [ghMinFollowers, setGhMinFollowers] = useState("");
   const [ghExpYears, setGhExpYears] = useState("");
   const [profSrc, setProfSrc] = useState("github");
+  /* Role family controls Profile Finder sources + X-Ray dork sets.
+     Tech is default; non-tech families hide useless sources (GitHub/GitLab/SO)
+     and surface niche ones (RepVue, Substack, Dribbble, accelerator alumni). */
+  const [roleFamily, setRoleFamily] = useState(() => getStoredKey("role_family") || "tech");
   const [profResults, setProfResults] = useState([]);
   const [profLoading, setProfLoading] = useState(false);
   const [profError, setProfError] = useState("");
@@ -429,11 +518,11 @@ RULES:
 - Tailor LOCATION strings to the country context provided
 - Return JSON only, no markdown, no commentary`;
 
-  async function analyseJD() {
+  async function analyseJD(overrideText) {
     setJdError(""); setJdLoading(true); setJdResult(null);
     try {
-      let text = jd;
-      if (jdMode === "url") {
+      let text = typeof overrideText === "string" && overrideText.trim() ? overrideText : jd;
+      if (jdMode === "url" && !overrideText) {
         if (!jdUrl.trim()) throw new Error("Paste a URL first");
         const isLI = /linkedin\.com/i.test(jdUrl);
         let raw;
@@ -458,11 +547,15 @@ RULES:
       const userPrompt = `COUNTRY: ${countryObj.name} (currency ${countryObj.currency})\nDefault location if JD silent: ${countryObj.default_loc}\n\nJOB DESCRIPTION:\n${text}`;
       const result = await llmCall(provider, JD_SCHEMA_PROMPT, userPrompt, { json: true, temperature: 0.25 });
 
-      /* Defensive: coerce any non-string values that slipped through */
+      /* Defensive: coerce any non-string values that slipped through, and strip stray
+         backslash-escapes the LLM sometimes emits (\"foo\" → "foo"). Without this,
+         the Google RUN links contain literal %5C%22 and return blank result pages. */
       if (result.search_strings && typeof result.search_strings === "object") {
         for (const k of Object.keys(result.search_strings)) {
           const v = result.search_strings[k];
-          if (typeof v !== "string") result.search_strings[k] = String(v || "");
+          let s = typeof v === "string" ? v : String(v || "");
+          s = s.replace(/\\"/g, '"').replace(/\\\\/g, "\\").replace(/\s+/g, " ").trim();
+          result.search_strings[k] = s;
         }
       }
 
@@ -484,11 +577,183 @@ RULES:
       };
       setCtx(newCtx);
       applyCtxToAllTabs(newCtx);
+      /* Fire bias scoring in background — doesn't block JD result render */
+      scoreBias(text);
     } catch (e) {
       setJdError(e.message || String(e));
     } finally {
       setJdLoading(false);
     }
+  }
+
+  /* ============== Inclusive Language / Bias Scorer (India-tuned) ==============
+     Indian JDs have specific failure modes that generic Western bias tools miss:
+     Tier-1 college gatekeeping (IIT/IIM/ISB only), caste-proxy language (vegetarian
+     only, "general category"), marital filters ("singles preferred"), appearance
+     filters ("smart and presentable"), regional bias ("Bangaloreans only"), and
+     socioeconomic filters (own laptop/2-wheeler). Also flags MISSING India-mandated
+     items: PoSH Act mention, maternity 26 weeks, salary range, PwD inclusion.
+     Re-tune the prompt if owner switches country away from IN. */
+  async function scoreBias(jdText) {
+    if (!jdText || jdText.length < 30) return;
+    setBiasLoading(true); setBiasResult(null);
+    try {
+      const isIndia = countryObj.code === "IN";
+      const system = `You are an expert in inclusive job description writing, with deep expertise in the INDIAN hiring context. Indian JDs have failure modes that generic Western bias tools miss. Be specific and actionable — recruiters in India use your output to rewrite JDs for fairer access.
+
+Return ONLY valid JSON, no prose, no markdown fences. Schema:
+{
+  "score": 0-100,
+  "verdict": "inclusive" | "mostly_inclusive" | "needs_work" | "biased",
+  "summary": "one sentence overall assessment, India-specific lens",
+  "flagged": [
+    { "phrase": "exact phrase from JD", "category": "gender" | "age" | "ability" | "culture_fit" | "education_tier" | "caste_proxy" | "marital_family" | "language_mandate" | "appearance" | "location_bias" | "socioeconomic", "skew": "masculine" | "feminine" | "ageist" | "ableist" | "elitist" | "exclusionary" | "regional", "rewrite": "specific suggestion for India context" }
+  ],
+  "strengths": ["positive inclusive elements you noticed"],
+  "missing": ["India-mandated or India-best-practice elements absent from this JD"]
+}
+
+INDIA-SPECIFIC SCORING (use this rubric, not generic Western):
+
+EDUCATION TIER GATEKEEPING (very common in India, heavy penalty):
+Flag any of: "IIT/IIM/ISB/BITS only", "Tier 1 college", "Tier 1 institute", "premier institute", "top 20 B-school", "elite engineering college", "from NIT/IIT", "Big 4 only", "FAANG only". These exclude 95%+ of Indian talent and correlate with class/caste privilege. Strong negative signal.
+
+GENDER (Indian recruiting patterns):
+Masculine-coded: aggressive, hunger, fire in belly, hustler, killer instinct, hunter, alpha, go-getter (in excess), warrior, ninja, rockstar, dominant, road warrior
+Feminine-coded: supportive, nurturing, gentle, soft-spoken, well-mannered, demure
+Explicit gender filters: "girls only" (BPO/night-shift code), "male candidates", "ladies only", "boys preferred"
+
+MARITAL / FAMILY FILTERS (illegal but common):
+"Singles preferred", "no family commitments", "should not have children", "bachelors only", "willing to relocate at short notice" (excludes caregivers), "ready to work late nights" (often filter against women), "family-friendly culture" (sometimes coded against working mothers)
+
+APPEARANCE (common in front-office/sales/hospitality):
+"Smart and presentable", "good-looking", "well-groomed", "fair complexion", "pleasing personality", "tall and well-built", "photo mandatory"
+
+CASTE-PROXY:
+"Vegetarian only" (often Brahmin-code in non-food roles), "from a good family", "should adjust to office culture which is vegetarian", explicit caste mentions, "general category only", "OBC/SC/ST need not apply"
+
+LANGUAGE MANDATE:
+"Fluent English mandatory" for roles where English isn't operationally needed (excludes Tier-2/3 talent). "Native English speaker", "convent-educated", "no MTI" (mother-tongue influence). "Hindi mandatory" can also exclude (South India).
+
+LOCATION BIAS:
+"Bangaloreans only", "must be from Mumbai", "local candidates only" (when role is hybrid/remote), "north Indian preferred", "south Indian only"
+
+AGE:
+"Below 30", "less than 5 years experience" (in senior roles), "digital native", "young and energetic", "fresh graduate" (when not entry-level)
+
+ABILITY:
+"Walk us through", "see what I mean", "stand up for", "able-bodied", "no health issues", missing PwD-friendly note in 40+ employee orgs
+
+SOCIOECONOMIC GATEKEEPING:
+"Must own a 2-wheeler" (when not delivery role), "must have own laptop" (excludes lower-income), "must own a car", "willing to invest in own equipment"
+
+CULTURE-FIT TRAPS (India variants):
+"Family environment" (often code for unpaid overtime), "we work hard play hard" (excludes those with caregiving), "young dynamic team" (ageist), "startup hustle" (excludes those with family/health needs), "boss-friendly" / "command-and-control" (toxic compliance)
+
+MISSING ELEMENTS (India-mandated or best-practice — flag if absent):
+${isIndia ? `- PoSH Act 2013 compliance / anti-sexual-harassment clause (LEGALLY MANDATED for 10+ employee orgs)
+- Maternity Benefit Act compliance (26 weeks paid leave) — mention if role is for women candidates
+- Salary range disclosure (still rare in IN but increasingly expected)
+- Career break / re-entry friendliness (huge gap in India for women returning from maternity)
+- Persons with Disability (PwD) friendliness — Rights of PwD Act 2016 mandates accommodation
+- Equal Employment Opportunity / no-discrimination statement
+- Hybrid/remote/WFO clarity (Indian JDs often vague — say "as per business need")
+- LGBT+ inclusion (still very rare in India, mention as strength when present)
+- No-bias hiring statement
+- Specific learning/upskilling budget (Indian talent values this heavily)
+- Wellness benefits beyond basic health insurance` : `- Salary range disclosure
+- Remote/hybrid clarity
+- Equal opportunity statement
+- Accessibility / PwD inclusion
+- Parental leave specifics
+- Diversity statement`}
+
+SCORING RUBRIC (Indian JD calibration):
+- 90-100: Genuinely inclusive, no tier gatekeeping, mentions PoSH/maternity/PwD, salary disclosed, clear remote policy, India-aware
+- 70-89: Mostly clean but 1-2 minor flags or missing 1-2 India-mandated items
+- 50-69: Tier-1-college filter OR several biased terms OR missing multiple India-mandated items
+- Below 50: Heavy gatekeeping (IIT/IIM only + appearance + marital), or explicit caste/gender filters
+
+The Indian recruiter using your output cares about: (a) expanding the funnel beyond tier-1 colleges, (b) legal compliance (PoSH, Maternity Act, PwD Act), (c) inclusivity for women returning after career breaks, (d) regional/linguistic inclusion across India.`;
+
+      const userPrompt = `JOB DESCRIPTION:\n${jdText}\n\nCOUNTRY CONTEXT: ${countryObj.name}`;
+      const result = await llmCall(provider, system, userPrompt, { json: true, temperature: 0.2 });
+      result.__provenance = result.__provenance || { mode: provider, [provider]: true };
+      setBiasResult(result);
+    } catch (e) {
+      setBiasResult({ error: e.message || String(e) });
+    } finally {
+      setBiasLoading(false);
+    }
+  }
+
+  /* ============== JD Generator ==============
+     Produces a complete, inclusive, India-tuned JD from a short brief.
+     If the user pasted their company's standard JD into Settings (jd_template),
+     the LLM mimics that JD's tone, section order, nomenclature, and any
+     boilerplate (About-company intro, EEO statement, PoSH clause).
+     Generated text is dropped into the main `jd` textarea and analyseJD is
+     called with the override — so ctx propagates to Profile/Market/Outreach
+     and the bias scorer fires on the result. */
+  async function generateJD() {
+    if (!briefRole.trim()) { setJdError("Role title required to generate"); return; }
+    setGenerateLoading(true); setJdError("");
+    try {
+      const isIndia = countryObj.code === "IN";
+      const system = `You are an expert recruiter writing job descriptions for the ${countryObj.name} market. Generate a complete, inclusive, professional JD from the role brief below.
+
+${jdTemplate.trim() ? `COMPANY TEMPLATE — match this JD's style: tone, section order, length, nomenclature (job-title conventions, internal terms), and any boilerplate (About-the-company intro, EEO statement, PoSH clause, benefits format). Mirror the structure exactly. If the template has a "How to apply" section, include one. If the template uses bullet points, use bullets. If prose, use prose.
+
+---TEMPLATE START---
+${jdTemplate.trim().slice(0, 4000)}
+---TEMPLATE END---
+` : `No company template provided. Use a standard inclusive JD structure for ${countryObj.name}:
+1. About the role (2-3 sentences)
+2. Responsibilities (5-8 bullets)
+3. Required skills (5-7 bullets)
+4. Nice to have (3-5 bullets)
+5. What we offer (4-6 bullets — include hybrid/remote clarity, learning budget, wellness)
+${isIndia ? `6. Equal opportunity statement (1-2 sentences, India-specific: caste, religion, gender, disability, marital status, sexual orientation)
+7. PoSH Act 2013 compliance note (1 sentence)` : `6. Equal opportunity statement`}`}
+
+INCLUSIVITY RULES — non-negotiable (these will be scored by the bias scorer right after):
+- NO masculine-coded words: aggressive, hunger, fire in belly, rockstar, ninja, hunter, killer instinct, road warrior, alpha, dominant
+- NO Tier-1 college gatekeeping: don't write "IIT/IIM/ISB only", "premier institute", "top 20 B-school", "Tier 1 college"
+- NO marital/family filters: don't write "singles preferred", "no family commitments", "ready to work late nights"
+- NO appearance filters: don't write "smart and presentable", "fair complexion", "well-groomed"
+- NO location gatekeeping if role is hybrid/remote
+- NO socioeconomic filters: don't require "own laptop" or "own 2-wheeler" unless operationally essential
+- USE gender-neutral pronouns ("you", "the candidate", "they")
+- INCLUDE salary range placeholder if applicable: write "[Salary: ₹X-Y LPA based on experience]" so the recruiter can fill it
+${isIndia ? `- INCLUDE these India-specific elements: PoSH Act compliance line, maternity-benefit-act mention if role is open to all genders, hybrid/remote clarity (NOT "as per business need"), career-break-friendly note where relevant, PwD-friendly statement` : ""}
+
+OUTPUT FORMAT: Plain text JD only, ready to publish on careers page. Use CAPS for section headers (no markdown #). No commentary, no preamble like "Here is the JD". Just the JD content itself, starting with the role title.`;
+
+      const userPrompt = `ROLE BRIEF:
+- Title: ${briefRole}
+${briefSeniority ? `- Seniority: ${briefSeniority}\n` : ""}${briefExp ? `- Experience: ${briefExp}\n` : ""}- Location: ${briefLocation || countryObj.default_loc}
+${briefSkills ? `- Key skills: ${briefSkills}\n` : ""}${briefTeam ? `- Team / what they'll work on: ${briefTeam}\n` : ""}${briefNotes ? `- Special notes / context: ${briefNotes}` : ""}
+
+Generate the full JD now.`;
+
+      const out = await llmCall(provider, system, userPrompt, { temperature: 0.6 });
+      const cleaned = typeof out === "string" ? out.trim() : String(out || "").trim();
+      if (!cleaned) throw new Error("LLM returned empty output");
+      setJd(cleaned);
+      setJdMode("paste"); /* switch back to paste view so user sees generated content */
+      /* Pass cleaned text directly to analyseJD to avoid state-update race condition */
+      analyseJD(cleaned);
+    } catch (e) {
+      setJdError("Generate failed: " + (e.message || String(e)));
+    } finally {
+      setGenerateLoading(false);
+    }
+  }
+
+  function saveJdTemplate(t) {
+    setJdTemplate(t);
+    if (t.trim()) localStorage.setItem("scout_jd_template", t);
+    else localStorage.removeItem("scout_jd_template");
   }
 
   function updateCtxField(field, value) {
@@ -627,17 +892,22 @@ RULES:
       else if (src === "gitlab") r = await searchGitLab();
       else if (src === "stackoverflow") r = await searchStackOverflow();
       else if (src === "hackernews") r = await searchHackerNews();
-      else if (src === "xray-linkedin" || src === "xray-github") {
+      else if (src.startsWith("xray-")) {
         const queries = [];
+        const skills = profQuery || (ctx.must_have || []).slice(0, 3).join(" ");
+        const kw = skills.split(/\s+/).filter(Boolean).slice(0, 4).map(s => `"${s}"`).join(" ");
+        const loc = ghLocation ? `"${ghLocation}"` : "";
+        const role = ctx.role ? `"${ctx.role}"` : "";
+
         if (src === "xray-linkedin") {
           queries.push({ label: "LinkedIn /in profiles", q: buildXRayQuery("linkedin.com") });
           queries.push({ label: "LinkedIn /pub (older)", q: buildXRayQuery("linkedin.com").replace("/in", "/pub") });
           queries.push({ label: "Naukri profiles (IN)", q: buildXRayQuery("naukri.com") });
           queries.push({ label: "Foundit / Monster (IN)", q: buildXRayQuery("foundit.in") + " OR site:monsterindia.com OR site:shine.com" });
           queries.push({ label: "Instahyre (IN tech)", q: buildXRayQuery("instahyre.com") });
-          queries.push({ label: "AmbitionBox employees (IN)", q: `site:ambitionbox.com/overview ${(ctx.must_have || []).slice(0, 2).map(s => `"${s}"`).join(" ")} ${ghLocation ? `"${ghLocation}"` : ""}` });
-          queries.push({ label: "Resumes (PDF/DOC)", q: `(filetype:pdf OR filetype:doc OR filetype:docx) (resume OR CV) ${(ctx.must_have || []).slice(0, 3).map((s) => `"${s}"`).join(" ")} ${ghLocation ? `"${ghLocation}"` : ""}` });
-        } else {
+          queries.push({ label: "AmbitionBox employees (IN)", q: `site:ambitionbox.com/overview ${(ctx.must_have || []).slice(0, 2).map(s => `"${s}"`).join(" ")} ${loc}` });
+          queries.push({ label: "Resumes (PDF/DOC)", q: `(filetype:pdf OR filetype:doc OR filetype:docx) (resume OR CV) ${(ctx.must_have || []).slice(0, 3).map((s) => `"${s}"`).join(" ")} ${loc}` });
+        } else if (src === "xray-github") {
           queries.push({ label: "GitHub profiles", q: buildXRayQuery("github.com") });
           queries.push({ label: "GitHub gists", q: buildXRayQuery("gist.github.com") });
           queries.push({ label: "GitLab profiles", q: buildXRayQuery("gitlab.com") + " -inurl:/issues -inurl:/merge_requests" });
@@ -645,6 +915,73 @@ RULES:
           queries.push({ label: "Medium engineers", q: buildXRayQuery("medium.com") });
           queries.push({ label: "Twitter / X", q: buildXRayQuery("twitter.com") + " OR site:x.com" });
         }
+        /* ============== NON-TECH X-RAY DORKS (v3.3) ============== */
+        else if (src === "xray-sales") {
+          /* Sales/GTM lives on niche community sites + LinkedIn Sales Nav syntax. */
+          queries.push({ label: "RepVue (sales rep reviews)", q: `site:repvue.com ${kw} ${loc}`.trim() });
+          queries.push({ label: "Bravado (sales community profiles)", q: `site:bravado.co/u ${kw} ${loc}`.trim() });
+          queries.push({ label: "Sales Hacker community", q: `site:saleshacker.com ${kw}`.trim() });
+          queries.push({ label: "LinkedIn — sales roles", q: `site:linkedin.com/in (${role || "\"sales\" OR \"account executive\" OR \"AE\" OR \"SDR\""}) ${kw} ${loc}`.trim() });
+          queries.push({ label: "AmbitionBox sales reviews (IN)", q: `site:ambitionbox.com (sales OR "account executive") ${kw} ${loc}`.trim() });
+          queries.push({ label: "Sales resumes (PDF)", q: `filetype:pdf (resume OR CV) (sales OR "account executive" OR "business development") ${kw} ${loc}`.trim() });
+        }
+        else if (src === "xray-startup") {
+          /* Founders, early employees, operators who've shipped 0→1 products. */
+          queries.push({ label: "Wellfound (ex-AngelList)", q: `site:wellfound.com/u ${kw} ${loc}`.trim() });
+          queries.push({ label: "Crunchbase /person", q: `site:crunchbase.com/person ${kw} ${loc}`.trim() });
+          queries.push({ label: "Y Combinator alumni", q: `(site:ycombinator.com OR site:news.ycombinator.com) (alumni OR founder OR "co-founder") ${kw}`.trim() });
+          queries.push({ label: "LinkedIn — founders", q: `site:linkedin.com/in ("founder" OR "co-founder" OR "ex-founder" OR "founding") ${kw} ${loc}`.trim() });
+          queries.push({ label: "Read.cv (operator portfolios)", q: `site:read.cv ${kw} ${loc}`.trim() });
+          queries.push({ label: "Twitter founders", q: `(site:twitter.com OR site:x.com) ("founder" OR "co-founder") ${kw}`.trim() });
+        }
+        else if (src === "xray-accelerator") {
+          /* Specific accelerator alumni — Appworks is the owner's explicit ask. */
+          queries.push({ label: "Appworks alumni (TW/SEA)", q: `site:appworks.tw (alumni OR founder OR portfolio) ${kw}`.trim() });
+          queries.push({ label: "Sequoia Surge portfolio (IN/SEA)", q: `site:surge.sequoiacap.com ${kw}`.trim() });
+          queries.push({ label: "Y Combinator companies", q: `site:ycombinator.com/companies ${kw}`.trim() });
+          queries.push({ label: "Techstars portfolio", q: `site:techstars.com/portfolio ${kw}`.trim() });
+          queries.push({ label: "500 Global portfolio", q: `(site:500.co OR site:500global.com) (portfolio OR alumni) ${kw}`.trim() });
+          queries.push({ label: "Antler portfolio", q: `site:antler.co ${kw}`.trim() });
+          queries.push({ label: "Accel Atoms / Scale (IN)", q: `(site:accel.com OR "accel atoms" OR "accel scale") ${kw} ${loc}`.trim() });
+        }
+        else if (src === "xray-marketing") {
+          /* Content, brand, growth, PMM live on writing platforms + niche communities. */
+          queries.push({ label: "Substack writers", q: `site:substack.com ${kw} ${loc}`.trim() });
+          queries.push({ label: "Medium authors (@handle)", q: `site:medium.com/@ ${kw} ${loc}`.trim() });
+          queries.push({ label: "MarketingProfs profiles", q: `site:marketingprofs.com ${kw}`.trim() });
+          queries.push({ label: "GrowthHackers community", q: `site:growthhackers.com ${kw}`.trim() });
+          queries.push({ label: "Reforge alumni mentions", q: `"reforge" (alumni OR "graduated from") ${kw} ${loc}`.trim() });
+          queries.push({ label: "LinkedIn — marketing roles", q: `site:linkedin.com/in (${role || "\"marketing\" OR \"growth\" OR \"brand\" OR \"PMM\""}) ${kw} ${loc}`.trim() });
+        }
+        else if (src === "xray-product") {
+          /* PMs/PMMs: community sites + portfolio resume sites. */
+          queries.push({ label: "Mind the Product authors", q: `site:mindtheproduct.com ${kw}`.trim() });
+          queries.push({ label: "Lenny's Newsletter community", q: `"lennysnewsletter.com" (community OR member OR contributor) ${kw} ${loc}`.trim() });
+          queries.push({ label: "Read.cv (modern resumes)", q: `site:read.cv ${kw} ${loc}`.trim() });
+          queries.push({ label: "Product Hunt makers", q: `site:producthunt.com/@ ${kw}`.trim() });
+          queries.push({ label: "LinkedIn — PM roles", q: `site:linkedin.com/in (${role || "\"product manager\" OR \"product owner\" OR \"PMM\""}) ${kw} ${loc}`.trim() });
+          queries.push({ label: "Medium PM authors", q: `site:medium.com/@ ("product manager" OR PM) ${kw}`.trim() });
+        }
+        else if (src === "xray-design") {
+          /* Designers cluster on visual-first platforms. */
+          queries.push({ label: "Dribbble profiles", q: `site:dribbble.com ${kw} ${loc}`.trim() });
+          queries.push({ label: "Behance portfolios", q: `site:behance.net ${kw} ${loc}`.trim() });
+          queries.push({ label: "Read.cv (designer resumes)", q: `site:read.cv (designer OR UX OR UI) ${kw} ${loc}`.trim() });
+          queries.push({ label: "Awwwards judges/profiles", q: `site:awwwards.com ${kw}`.trim() });
+          queries.push({ label: "Figma community profiles", q: `site:figma.com/@ ${kw}`.trim() });
+          queries.push({ label: "LinkedIn — design roles", q: `site:linkedin.com/in (${role || "\"product designer\" OR \"UX\" OR \"UI designer\""}) ${kw} ${loc}`.trim() });
+        }
+        else if (src === "xray-india-jobsites") {
+          /* Universal IN non-tech sourcing — AmbitionBox employee breadcrumbs are gold. */
+          queries.push({ label: "AmbitionBox employees", q: `site:ambitionbox.com/overview ${role || kw} ${loc}`.trim() });
+          queries.push({ label: "AmbitionBox reviews (signal: tenure, role)", q: `site:ambitionbox.com/reviews ${role || kw} ${loc}`.trim() });
+          queries.push({ label: "Naukri profile pages", q: `site:naukri.com (mnjuser OR profile) ${kw} ${loc}`.trim() });
+          queries.push({ label: "Foundit / Monster (IN)", q: `(site:foundit.in OR site:monsterindia.com OR site:shine.com) ${kw} ${loc}`.trim() });
+          queries.push({ label: "Instahyre profiles", q: `site:instahyre.com ${kw} ${loc}`.trim() });
+          queries.push({ label: "Glassdoor India", q: `site:glassdoor.co.in ${role || kw} ${loc}`.trim() });
+          queries.push({ label: "Resumes — IN (PDF/DOC)", q: `(filetype:pdf OR filetype:doc) (resume OR CV) ${kw} ${loc || "India"}`.trim() });
+        }
+
         r = queries.map((qq) => ({
           source: "xray", name: qq.label, bio: qq.q,
           profile_url: `https://www.google.com/search?q=${encodeURIComponent(qq.q)}`,
@@ -1016,8 +1353,8 @@ Use accurate annual base figures for the country. India: INR (absolute, e.g. 180
         <Tabs tab={tab} setTab={setTab} ctx={ctx} picked={picked} />
         <ContextBar ctx={ctx} picked={picked} resetCtx={resetCtx} clearPicked={clearPicked} updateCtxField={updateCtxField} />
 
-        {tab === "jd" && (<JDIntelTab jdMode={jdMode} setJdMode={setJdMode} jd={jd} setJd={setJd} jdUrl={jdUrl} setJdUrl={setJdUrl} jdLoading={jdLoading} jdResult={jdResult} jdError={jdError} analyseJD={analyseJD} setTab={setTab} updateCtxField={updateCtxField} />)}
-        {tab === "profiles" && (<ProfileFinderTab profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} ghLanguage={ghLanguage} setGhLanguage={setGhLanguage} ghMinFollowers={ghMinFollowers} setGhMinFollowers={setGhMinFollowers} ghExpYears={ghExpYears} setGhExpYears={setGhExpYears} profSrc={profSrc} profResults={profResults} profLoading={profLoading} profError={profError} profFetched={profFetched} findProfiles={findProfiles} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} ctx={ctx} country={countryObj} />)}
+        {tab === "jd" && (<JDIntelTab jdMode={jdMode} setJdMode={setJdMode} jd={jd} setJd={setJd} jdUrl={jdUrl} setJdUrl={setJdUrl} jdLoading={jdLoading} jdResult={jdResult} jdError={jdError} analyseJD={analyseJD} setTab={setTab} updateCtxField={updateCtxField} biasResult={biasResult} biasLoading={biasLoading} jdTemplate={jdTemplate} briefRole={briefRole} setBriefRole={setBriefRole} briefSeniority={briefSeniority} setBriefSeniority={setBriefSeniority} briefExp={briefExp} setBriefExp={setBriefExp} briefLocation={briefLocation} setBriefLocation={setBriefLocation} briefSkills={briefSkills} setBriefSkills={setBriefSkills} briefTeam={briefTeam} setBriefTeam={setBriefTeam} briefNotes={briefNotes} setBriefNotes={setBriefNotes} generateLoading={generateLoading} generateJD={generateJD} country={countryObj} setTabAndOpenSettings={() => setShowSettings(true)} />)}
+        {tab === "profiles" && (<ProfileFinderTab profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} ghLanguage={ghLanguage} setGhLanguage={setGhLanguage} ghMinFollowers={ghMinFollowers} setGhMinFollowers={setGhMinFollowers} ghExpYears={ghExpYears} setGhExpYears={setGhExpYears} profSrc={profSrc} profResults={profResults} profLoading={profLoading} profError={profError} profFetched={profFetched} findProfiles={findProfiles} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} ctx={ctx} country={countryObj} roleFamily={roleFamily} changeRoleFamily={changeRoleFamily} />)}
         {tab === "email" && (<EmailFinderTab emailUser={emailUser} setEmailUser={setEmailUser} emailFullName={emailFullName} setEmailFullName={setEmailFullName} emailLoading={emailLoading} emailResult={emailResult} emailError={emailError} findEmail={findEmail} picked={picked} setTab={setTab} setOutProfile={setOutProfile} setOutRole={setOutRole} ctx={ctx} />)}
         {tab === "outreach" && (<OutreachTab outProfile={outProfile} setOutProfile={setOutProfile} outRole={outRole} setOutRole={setOutRole} outTone={outTone} setOutTone={setOutTone} outResult={outResult} outDrafts={outDrafts} outLoading={outLoading} draftOutreach={draftOutreach} saved={saved} setPicked={setPicked} />)}
         {tab === "signals" && (<SignalsTab sigUser={sigUser} setSigUser={setSigUser} sigLoading={sigLoading} sigResult={sigResult} sigError={sigError} feedLoading={feedLoading} feedResult={feedResult} fetchSignals={fetchSignals} setTab={setTab} setOutProfile={setOutProfile} setEmailUser={setEmailUser} />)}
@@ -1025,7 +1362,7 @@ Use accurate annual base figures for the country. India: INR (absolute, e.g. 180
 
         <Footer />
       </div>
-      {showSettings && <SettingsModal close={() => setShowSettings(false)} provider={provider} setProvider={changeProvider} />}
+      {showSettings && <SettingsModal close={() => setShowSettings(false)} provider={provider} setProvider={changeProvider} jdTemplate={jdTemplate} saveJdTemplate={saveJdTemplate} />}
     </div>
   );
 }
@@ -1161,18 +1498,20 @@ function miniBtn(color) {
 }
 
 /* ============== Settings Modal ============== */
-function SettingsModal({ close, provider, setProvider }) {
+function SettingsModal({ close, provider, setProvider, jdTemplate, saveJdTemplate }) {
   const [groq, setGroq] = useState(getStoredKey("groq"));
   const [gemini, setGemini] = useState(getStoredKey("gemini"));
   const [gh, setGh] = useState(getStoredKey("github"));
+  const [tmpl, setTmpl] = useState(jdTemplate || "");
 
   function save() {
     setStoredKey("groq", groq.trim());
     setStoredKey("gemini", gemini.trim());
     setStoredKey("github", gh.trim());
+    saveJdTemplate(tmpl);
     close();
   }
-  function clearAll() { setStoredKey("groq", ""); setStoredKey("gemini", ""); setStoredKey("github", ""); setGroq(""); setGemini(""); setGh(""); }
+  function clearAll() { setStoredKey("groq", ""); setStoredKey("gemini", ""); setStoredKey("github", ""); saveJdTemplate(""); setGroq(""); setGemini(""); setGh(""); setTmpl(""); }
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, backdropFilter: "blur(4px)" }} onClick={close}>
@@ -1203,6 +1542,13 @@ function SettingsModal({ close, provider, setProvider }) {
           <b style={{ color: T.text2 }}>GROQ / GEMINI:</b> single provider with auto-fallback to the other if it errors.<br />
           <b style={{ color: T.purple }}>⚡ PARALLEL:</b> fires both simultaneously and merges results — union of skills/booleans, averaged salary numbers, dual outreach drafts. Costs 2× quota but catches misses one model alone would make. Requires both keys.
         </p>
+
+        <FieldLabel style={{ marginTop: 18 }}>COMPANY JD TEMPLATE (OPTIONAL)</FieldLabel>
+        <TextArea value={tmpl} onChange={(e) => setTmpl(e.target.value)} rows={8} placeholder="Paste one of your company's existing JDs here. SCOUT's GENERATE mode will mimic the structure, tone, section order, and any boilerplate (About-company intro, EEO statement, PoSH clause, benefits format). Leave empty to use a generic inclusive structure." />
+        <p style={{ color: T.text3, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          Stored locally only. {tmpl.trim() ? <span style={{ color: T.green }}>● {tmpl.trim().length} chars loaded — GENERATE mode will use this.</span> : <span style={{ color: T.amber }}>○ Empty — GENERATE will use generic inclusive structure tuned to your selected country.</span>}
+        </p>
+
         <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
           <button onClick={save} style={{ flex: 1, padding: "12px 18px", background: `linear-gradient(90deg, ${T.cyan}, ${T.purple})`, color: T.bg, border: "none", borderRadius: 8, fontFamily: T.mono, fontSize: 12, fontWeight: 800, letterSpacing: 2 }}>SAVE</button>
           <button onClick={clearAll} style={{ padding: "12px 18px", background: "transparent", color: T.red, border: `1px solid ${T.red}66`, borderRadius: 8, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>CLEAR ALL</button>
@@ -1213,15 +1559,16 @@ function SettingsModal({ close, provider, setProvider }) {
 }
 
 /* ============== JD Intel Tab ============== */
-function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, jdResult, jdError, analyseJD, setTab, updateCtxField }) {
+function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, jdResult, jdError, analyseJD, setTab, updateCtxField, biasResult, biasLoading, jdTemplate, briefRole, setBriefRole, briefSeniority, setBriefSeniority, briefExp, setBriefExp, briefLocation, setBriefLocation, briefSkills, setBriefSkills, briefTeam, setBriefTeam, briefNotes, setBriefNotes, generateLoading, generateJD, country, setTabAndOpenSettings }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <Card title="JD INPUT" accent={T.cyan}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
           <ModeChip active={jdMode === "paste"} onClick={() => setJdMode("paste")} label="✎ PASTE JD" />
           <ModeChip active={jdMode === "url"} onClick={() => setJdMode("url")} label="🔗 FROM URL" />
+          <ModeChip active={jdMode === "generate"} onClick={() => setJdMode("generate")} label="✨ GENERATE" />
         </div>
-        {jdMode === "paste" ? (
+        {jdMode === "paste" && (
           <>
             <FieldLabel>Paste the JD text</FieldLabel>
             <TextArea value={jd} onChange={(e) => setJd(e.target.value)} placeholder="Paste full JD..." rows={12} />
@@ -1230,7 +1577,8 @@ function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, 
               <MicroBtn onClick={async () => { try { setJd(await navigator.clipboard.readText()); } catch {} }} color={T.purple}>📋 PASTE FROM CLIPBOARD</MicroBtn>
             </div>
           </>
-        ) : (
+        )}
+        {jdMode === "url" && (
           <>
             <FieldLabel>Careers page or LinkedIn job URL</FieldLabel>
             <TextInput value={jdUrl} onChange={(e) => setJdUrl(e.target.value)} placeholder="https://careers.company.com/jobs/123" />
@@ -1243,7 +1591,42 @@ function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, 
             </div>
           </>
         )}
-        <PrimaryBtn onClick={analyseJD} disabled={jdLoading} style={{ marginTop: 14 }}>{jdLoading ? "ANALYSING..." : "→ ANALYSE JD"}</PrimaryBtn>
+        {jdMode === "generate" && (
+          <>
+            <div style={{ marginBottom: 12, padding: "10px 12px", background: `${T.purple}15`, border: `1px solid ${T.purpleDim}`, borderRadius: 8, color: T.text2, fontSize: 12, lineHeight: 1.5 }}>
+              {jdTemplate ? (
+                <><span style={{ color: T.green }}>● TEMPLATE LOADED</span> — LLM will mimic your company's JD style. <button onClick={setTabAndOpenSettings} style={{ background: "transparent", border: "none", color: T.cyan, textDecoration: "underline", cursor: "pointer", fontFamily: T.mono, fontSize: 11, padding: 0 }}>Edit template ⚙</button></>
+              ) : (
+                <><span style={{ color: T.amber }}>● NO TEMPLATE</span> — using generic inclusive {country.name} JD structure. <button onClick={setTabAndOpenSettings} style={{ background: "transparent", border: "none", color: T.cyan, textDecoration: "underline", cursor: "pointer", fontFamily: T.mono, fontSize: 11, padding: 0 }}>Paste your company JD in Settings ⚙</button> for branded output.</>
+              )}
+            </div>
+            <FieldLabel>Role title <span style={{ color: T.red }}>*</span></FieldLabel>
+            <TextInput value={briefRole} onChange={(e) => setBriefRole(e.target.value)} placeholder="Senior Data Engineer / Lead Backend Engineer / GTM Manager..." />
+            <Row>
+              <div style={{ flex: 1 }}>
+                <FieldLabel style={{ marginTop: 10 }}>Seniority</FieldLabel>
+                <TextInput value={briefSeniority} onChange={(e) => setBriefSeniority(e.target.value)} placeholder="Senior / Lead / Manager / Director" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <FieldLabel style={{ marginTop: 10 }}>Experience (years)</FieldLabel>
+                <TextInput value={briefExp} onChange={(e) => setBriefExp(e.target.value)} placeholder="5-8" />
+              </div>
+            </Row>
+            <FieldLabel style={{ marginTop: 10 }}>Location</FieldLabel>
+            <TextInput value={briefLocation} onChange={(e) => setBriefLocation(e.target.value)} placeholder={`Default: ${country.default_loc}`} />
+            <FieldLabel style={{ marginTop: 10 }}>Key skills (comma-separated)</FieldLabel>
+            <TextInput value={briefSkills} onChange={(e) => setBriefSkills(e.target.value)} placeholder="Python, Spark, AWS, Kafka, Airflow" />
+            <FieldLabel style={{ marginTop: 10 }}>Team / what they'll work on</FieldLabel>
+            <TextArea value={briefTeam} onChange={(e) => setBriefTeam(e.target.value)} rows={2} placeholder="Building the data platform for the consumer analytics team — owning real-time pipelines and ML feature store..." />
+            <FieldLabel style={{ marginTop: 10 }}>Special notes (optional)</FieldLabel>
+            <TextArea value={briefNotes} onChange={(e) => setBriefNotes(e.target.value)} rows={2} placeholder="Remote-friendly / open to career-break returners / urgent backfill / etc." />
+          </>
+        )}
+        {jdMode === "generate" ? (
+          <PrimaryBtn onClick={generateJD} disabled={generateLoading || jdLoading} style={{ marginTop: 14 }}>{generateLoading ? "GENERATING JD..." : jdLoading ? "ANALYSING..." : "✨ GENERATE + ANALYSE"}</PrimaryBtn>
+        ) : (
+          <PrimaryBtn onClick={() => analyseJD()} disabled={jdLoading} style={{ marginTop: 14 }}>{jdLoading ? "ANALYSING..." : "→ ANALYSE JD"}</PrimaryBtn>
+        )}
         {jdError && <ErrBox>{jdError}</ErrBox>}
       </Card>
 
@@ -1281,22 +1664,132 @@ function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, 
         )}
       </Card>
 
+      {/* INCLUSIVE LANGUAGE SCORER — auto-runs after JD analyze.
+          Shows score, flagged terms with rewrites, and missing inclusion elements. */}
+      {(biasLoading || biasResult) && (
+        <div style={{ gridColumn: "1 / -1" }}>
+          <Card title="INCLUSIVE LANGUAGE SCORE" accent={T.purple}>
+            {biasLoading && <LoadingPulse />}
+            {biasResult && biasResult.error && (
+              <div style={{ color: T.red, fontFamily: T.mono, fontSize: 13 }}>Error: {biasResult.error}</div>
+            )}
+            {biasResult && !biasResult.error && (
+              <>
+                {biasResult.__provenance && (
+                  <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end" }}>
+                    <ProvenanceBadge prov={biasResult.__provenance} />
+                  </div>
+                )}
+                {/* Score header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 16, padding: 16, background: T.bg3, borderRadius: 10, border: `1px solid ${
+                  biasResult.score >= 90 ? T.green :
+                  biasResult.score >= 70 ? T.cyan :
+                  biasResult.score >= 50 ? T.amber : T.red
+                }55` }}>
+                  <div style={{ fontSize: 48, fontWeight: 800, fontFamily: T.mono, color:
+                    biasResult.score >= 90 ? T.green :
+                    biasResult.score >= 70 ? T.cyan :
+                    biasResult.score >= 50 ? T.amber : T.red,
+                    lineHeight: 1, minWidth: 90 }}>{biasResult.score ?? "—"}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 11, color: T.text3, letterSpacing: 2, marginBottom: 4 }}>{(biasResult.verdict || "").toUpperCase().replace(/_/g, " ")}</div>
+                    <div style={{ color: T.text, fontSize: 14, lineHeight: 1.5 }}>{biasResult.summary || ""}</div>
+                  </div>
+                </div>
+
+                {/* Flagged terms */}
+                {Array.isArray(biasResult.flagged) && biasResult.flagged.length > 0 && (
+                  <>
+                    <Divider label={`FLAGGED TERMS (${biasResult.flagged.length})`} />
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 10 }}>
+                      {biasResult.flagged.map((f, i) => (
+                        <div key={i} style={{ padding: 12, background: T.bg3, border: `1px solid ${T.amber}55`, borderRadius: 8 }}>
+                          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                            <Badge color={T.amber}>{(f.category || "").toUpperCase()}</Badge>
+                            {f.skew && <Badge color={T.red}>{f.skew.toUpperCase()}</Badge>}
+                          </div>
+                          <div style={{ fontFamily: T.mono, fontSize: 13, color: T.red, marginBottom: 6 }}>"{f.phrase}"</div>
+                          <div style={{ fontSize: 13, color: T.text2, lineHeight: 1.5 }}>
+                            <span style={{ color: T.green, fontFamily: T.mono, fontSize: 10, letterSpacing: 1.5, marginRight: 6 }}>REWRITE →</span>
+                            {f.rewrite}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Strengths + missing */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+                  {Array.isArray(biasResult.strengths) && biasResult.strengths.length > 0 && (
+                    <div>
+                      <FieldLabel>✓ STRENGTHS</FieldLabel>
+                      <ul style={{ margin: 0, paddingLeft: 18, color: T.text2, fontSize: 13, lineHeight: 1.7 }}>
+                        {biasResult.strengths.map((s, i) => <li key={i} style={{ color: T.green }}>{s}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {Array.isArray(biasResult.missing) && biasResult.missing.length > 0 && (
+                    <div>
+                      <FieldLabel>✗ MISSING</FieldLabel>
+                      <ul style={{ margin: 0, paddingLeft: 18, color: T.text2, fontSize: 13, lineHeight: 1.7 }}>
+                        {biasResult.missing.map((m, i) => <li key={i} style={{ color: T.amber }}>{m}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </Card>
+        </div>
+      )}
+
       {jdResult?.search_strings && Object.keys(jdResult.search_strings).length > 0 && (
         <div style={{ gridColumn: "1 / -1" }}>
           <Card title="BOOLEAN + X-RAY STRINGS (all variants)" accent={T.green}>
-            <div style={{ color: T.text3, fontFamily: T.mono, fontSize: 10, marginBottom: 12, letterSpacing: 1.5 }}>Copy any string OR click RUN to open in Google. Links are clickable — no popup needed.</div>
+            <div style={{ color: T.text3, fontFamily: T.mono, fontSize: 10, marginBottom: 12, letterSpacing: 1.5 }}>Every string is runnable. RUN ↗ opens Google X-Ray. NATIVE ↗ opens the platform's own search (LinkedIn/GitHub/StackOverflow).</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 10 }}>
               {Object.entries(jdResult.search_strings).map(([k, v]) => {
-                const value = typeof v === "string" ? v : String(v || "");
-                const isXray = k.startsWith("xray") || k.startsWith("google") || k.startsWith("x_advanced");
+                /* Clean spurious backslash-escapes that some LLMs emit (\"foo\" → "foo")
+                   and collapse whitespace. Without this, Google sees literal %5C%22 in the
+                   URL and shows a blank/garbled results page. */
+                const raw = typeof v === "string" ? v : String(v || "");
+                const value = raw.replace(/\\"/g, '"').replace(/\\\\/g, "\\").replace(/\s+/g, " ").trim();
                 const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+                /* Native-platform deep links — open the search on the platform itself
+                   instead of via Google. More reliable for LinkedIn/GitHub which Google
+                   sometimes shows partial results for. */
+                let nativeUrl = null;
+                let nativeLabel = null;
+                if (k === "linkedin_basic" || k === "linkedin_around" || k === "linkedin_excludes") {
+                  nativeUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(value)}`;
+                  nativeLabel = "LINKEDIN";
+                } else if (k === "github_users") {
+                  nativeUrl = `https://github.com/search?type=users&q=${encodeURIComponent(value)}`;
+                  nativeLabel = "GITHUB";
+                } else if (k === "github_code") {
+                  nativeUrl = `https://github.com/search?type=code&q=${encodeURIComponent(value)}`;
+                  nativeLabel = "GITHUB";
+                } else if (k === "github_repos") {
+                  nativeUrl = `https://github.com/search?type=repositories&q=${encodeURIComponent(value)}`;
+                  nativeLabel = "GITHUB";
+                } else if (k === "stackoverflow_tags") {
+                  /* SO needs tags separated by `+` and URL-prefix style */
+                  const tags = (value.match(/\[([^\]]+)\]/g) || []).map(t => t.slice(1, -1)).join("+");
+                  if (tags) { nativeUrl = `https://stackoverflow.com/questions/tagged/${encodeURIComponent(tags)}`; nativeLabel = "STACKOVERFLOW"; }
+                }
                 return (
                   <div key={k} style={{ padding: 12, background: T.bg3, border: `1px solid ${T.cyanDim}`, borderRadius: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
                       <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green, letterSpacing: 1.5, fontWeight: 700 }}>{k.toUpperCase().replace(/_/g, " ")}</span>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         <CopyBtn text={value} />
-                        {isXray && value && <a href={googleUrl} target="_blank" rel="noreferrer" style={{ padding: "5px 10px", background: `${T.cyan}11`, color: T.cyan, border: `1px solid ${T.cyan}55`, borderRadius: 6, fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textDecoration: "none" }}>🔍 RUN</a>}
+                        {value && nativeUrl && (
+                          <a href={nativeUrl} target="_blank" rel="noreferrer" title={`Open in ${nativeLabel}`} style={{ padding: "5px 10px", background: `${T.purple}11`, color: T.purple, border: `1px solid ${T.purple}55`, borderRadius: 6, fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textDecoration: "none" }}>↗ {nativeLabel}</a>
+                        )}
+                        {value && (
+                          <a href={googleUrl} target="_blank" rel="noreferrer" title="Open Google X-Ray search" style={{ padding: "5px 10px", background: `${T.cyan}11`, color: T.cyan, border: `1px solid ${T.cyan}55`, borderRadius: 6, fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textDecoration: "none" }}>🔍 RUN</a>
+                        )}
                       </div>
                     </div>
                     <div style={{ fontFamily: T.mono, fontSize: 12, color: T.text, wordBreak: "break-word", lineHeight: 1.5 }}>{value || <span style={{ color: T.red }}>(empty — LLM returned no value)</span>}</div>
@@ -1385,7 +1878,26 @@ function EditableStat({ label, value, onSave }) {
 }
 
 /* ============== Profile Finder Tab ============== */
-function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLocation, ghLanguage, setGhLanguage, ghMinFollowers, setGhMinFollowers, ghExpYears, setGhExpYears, profSrc, profResults, profLoading, profError, profFetched, findProfiles, pickCandidate, saveCandidate, saved, ctx, country }) {
+function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLocation, ghLanguage, setGhLanguage, ghMinFollowers, setGhMinFollowers, ghExpYears, setGhExpYears, profSrc, profResults, profLoading, profError, profFetched, findProfiles, pickCandidate, saveCandidate, saved, ctx, country, roleFamily, changeRoleFamily }) {
+  /* Render only the sources allowed for the current role family. Tech keeps full
+     access (GitHub/GitLab/SO/HN + X-Ray); non-tech families hide useless sources
+     and surface niche X-Ray dorks (RepVue, Substack, Dribbble, accelerator alumni). */
+  const allowedSources = (ROLE_FAMILIES[roleFamily] || ROLE_FAMILIES.tech).sources;
+  const SOURCE_LABELS = {
+    "github": "● GITHUB",
+    "gitlab": "● GITLAB",
+    "stackoverflow": "● STACK OVERFLOW",
+    "hackernews": "● HACKER NEWS",
+    "xray-linkedin": "● X-RAY LINKEDIN+",
+    "xray-github": "● X-RAY GITHUB+DEV.TO+X",
+    "xray-sales": "● X-RAY SALES (RepVue/Bravado)",
+    "xray-startup": "● X-RAY FOUNDERS (Wellfound/CB)",
+    "xray-accelerator": "● X-RAY ACCELERATORS (Appworks/YC/Surge)",
+    "xray-marketing": "● X-RAY MARKETING (Substack/Medium)",
+    "xray-product": "● X-RAY PRODUCT (MtP/Lenny/Read.cv)",
+    "xray-design": "● X-RAY DESIGN (Dribbble/Behance)",
+    "xray-india-jobsites": "● X-RAY IN JOB SITES (AmbitionBox/Naukri)",
+  };
   const quickSkills = ctx.must_have.slice(0, 6);
   const indianLocations = ["Bangalore, India", "Hyderabad, India", "Pune, India", "Mumbai, India", "Chennai, India", "Delhi, India", "Gurgaon, India", "Noida, India"];
   const globalLocations = ["Remote", "San Francisco", "New York", "London", "Berlin", "Singapore", "Toronto"];
@@ -1430,14 +1942,29 @@ function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLocation, 
             </div>
           </Field>
         </Row>
+        <Divider label="ROLE FAMILY" />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+          {Object.entries(ROLE_FAMILIES).map(([key, fam]) => (
+            <button key={key} onClick={() => changeRoleFamily(key)} title={fam.desc} style={{
+              padding: "6px 11px",
+              background: roleFamily === key ? `linear-gradient(90deg, ${T.cyan}, ${T.purple})` : "transparent",
+              color: roleFamily === key ? T.bg : T.text2,
+              border: `1px solid ${roleFamily === key ? T.purple : T.cyanDim}`,
+              borderRadius: 6, fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: 1.5, cursor: "pointer",
+            }}>{fam.label}</button>
+          ))}
+        </div>
+        <div style={{ color: T.text3, fontFamily: T.mono, fontSize: 10, letterSpacing: 1, marginTop: 4, marginBottom: 4 }}>
+          {(ROLE_FAMILIES[roleFamily] || ROLE_FAMILIES.tech).desc} · {allowedSources.length} sources available
+        </div>
+
         <Divider label="SELECT SOURCE" />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <SourceBtn active={profSrc === "github"} onClick={() => findProfiles("github")}>● GITHUB</SourceBtn>
-          <SourceBtn active={profSrc === "gitlab"} onClick={() => findProfiles("gitlab")}>● GITLAB</SourceBtn>
-          <SourceBtn active={profSrc === "stackoverflow"} onClick={() => findProfiles("stackoverflow")}>● STACK OVERFLOW</SourceBtn>
-          <SourceBtn active={profSrc === "hackernews"} onClick={() => findProfiles("hackernews")}>● HACKER NEWS</SourceBtn>
-          <SourceBtn active={profSrc === "xray-linkedin"} onClick={() => findProfiles("xray-linkedin")}>● X-RAY LINKEDIN+</SourceBtn>
-          <SourceBtn active={profSrc === "xray-github"} onClick={() => findProfiles("xray-github")}>● X-RAY GITHUB+DEV.TO+X</SourceBtn>
+          {allowedSources.map((src) => (
+            <SourceBtn key={src} active={profSrc === src} onClick={() => findProfiles(src)}>
+              {SOURCE_LABELS[src] || src.toUpperCase()}
+            </SourceBtn>
+          ))}
         </div>
         {profError && <ErrBox>{profError}</ErrBox>}
       </Card>
@@ -1449,7 +1976,7 @@ function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLocation, 
         <div style={{ marginTop: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontFamily: T.mono, fontSize: 11, color: T.text3, letterSpacing: 2 }}>{profResults.length} RESULTS · {profSrc.toUpperCase()}</div>
-            {profSrc !== "xray-linkedin" && profSrc !== "xray-github" && <MicroBtn onClick={() => exportCSV(profResults)} color={T.green}>↓ EXPORT CSV</MicroBtn>}
+            {!profSrc.startsWith("xray-") && <MicroBtn onClick={() => exportCSV(profResults)} color={T.green}>↓ EXPORT CSV</MicroBtn>}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
             {profResults.map((p, i) => <ProfileCard key={i} p={p} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} />)}
