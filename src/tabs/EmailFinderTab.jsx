@@ -88,13 +88,17 @@ export function EmailFinderTab({ emailUser, setEmailUser, emailFullName, setEmai
             <div style={{ marginTop: 12 }}>
               <FieldLabel>EXPERIENCE ({apifyProfResult.experience.length})</FieldLabel>
               <div style={{ display: "grid", gap: 6 }}>
-                {apifyProfResult.experience.slice(0, 6).map((e, i) => (
-                  <div key={i} style={{ padding: 10, background: T.bg3, border: `1px solid ${T.purpleDim}`, borderRadius: 6 }}>
-                    <div style={{ color: T.purple, fontFamily: T.mono, fontSize: 12, fontWeight: 700 }}>{e.title || e.jobTitle || e.position || "—"}</div>
-                    <div style={{ color: T.text2, fontSize: 13 }}>{e.companyName || e.company || "—"}</div>
-                    {(e.dateRange || e.duration || e.dates) && <div style={{ color: T.text3, fontFamily: T.mono, fontSize: 11, marginTop: 2 }}>{e.dateRange || e.duration || e.dates}</div>}
-                  </div>
-                ))}
+                {apifyProfResult.experience.slice(0, 6).map((e, i) => {
+                  const dateRange = e.dateRange || e.duration || e.dates
+                    || (e.jobStartedOn && `${e.jobStartedOn} – ${e.jobStillWorking ? "Present" : (e.jobEndedOn || "")}`);
+                  return (
+                    <div key={i} style={{ padding: 10, background: T.bg3, border: `1px solid ${T.purpleDim}`, borderRadius: 6 }}>
+                      <div style={{ color: T.purple, fontFamily: T.mono, fontSize: 12, fontWeight: 700 }}>{e.title || e.jobTitle || e.position || "—"}</div>
+                      <div style={{ color: T.text2, fontSize: 13 }}>{e.companyName || e.company || "—"}</div>
+                      {dateRange && <div style={{ color: T.text3, fontFamily: T.mono, fontSize: 11, marginTop: 2 }}>{dateRange}</div>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -102,7 +106,7 @@ export function EmailFinderTab({ emailUser, setEmailUser, emailFullName, setEmai
           {apifyProfResult.education && apifyProfResult.education.length > 0 && (
             <div style={{ marginTop: 12 }}>
               <FieldLabel>EDUCATION</FieldLabel>
-              <Pills items={apifyProfResult.education.map((e) => e.schoolName || e.school || e.name || e.title).filter(Boolean).slice(0, 6)} color={T.cyan} />
+              <Pills items={apifyProfResult.education.map((e) => e.university || e.schoolName || e.school || e.name || e.title).filter(Boolean).slice(0, 6)} color={T.cyan} />
             </div>
           )}
 
