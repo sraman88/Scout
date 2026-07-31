@@ -8,6 +8,7 @@ import { searchStackOverflow } from "./lib/stackoverflow.js";
 import { searchHackerNews, hnUserLookup } from "./lib/hackernews.js";
 import { redditLookup, devtoLookup, buildXRayQuery, buildEmailXRays } from "./lib/social.js";
 import { scrapeLinkedInProfile } from "./lib/apify.js";
+import { searchLinkedInCandidates, searchGoogleResults } from "./lib/apifySearch.js";
 import { Header } from "./components/Header.jsx";
 import { Tabs } from "./components/Tabs.jsx";
 import { ContextBar } from "./components/ContextBar.jsx";
@@ -106,6 +107,7 @@ export default function App() {
   const [profResults, setProfResults] = useState([]);
   const [profLoading, setProfLoading] = useState(false);
   const [profError, setProfError] = useState("");
+  const [profWarning, setProfWarning] = useState("");
   const [profFetched, setProfFetched] = useState(false);
   const [saved, setSaved] = useState([]);
 
@@ -181,6 +183,13 @@ export default function App() {
       };
       setCtx(newCtx);
       applyCtxToAllTabs(newCtx);
+
+      /* Auto-advance: jump straight to Profiles with real cross-web results
+         already loading, instead of requiring a manual search click. */
+      const autoQuery = (newCtx.must_have || []).slice(0, 4).join(" ") || newCtx.role || "";
+      const autoLocation = newCtx.location || countryObj.default_loc || "";
+      setTab("profiles");
+      findProfiles("auto", { query: autoQuery, location: autoLocation });
     } catch (e) {
       setJdError(e.message || String(e));
     } finally {
@@ -205,22 +214,38 @@ export default function App() {
   }
 
   /* Profile Finder */
-  async function findProfiles(src) {
+  async function findProfiles(src, override) {
     src = src || profSrc;
-    setProfSrc(src); setProfError(""); setProfLoading(true); setProfFetched(true); setProfResults([]);
+    const query = override?.query ?? profQuery;
+    const location = override?.location ?? ghLocation;
+    setProfSrc(src); setProfError(""); setProfWarning(""); setProfLoading(true); setProfFetched(true); setProfResults([]);
     try {
       let r = [];
-      const xrayParams = { profQuery, mustHave: ctx.must_have, ghLocation, ghExpYears };
-      if (src === "github") r = await searchGitHubUsers({ ghLanguage, ghLocation, ghMinFollowers, ghExpYears });
-      else if (src === "stackoverflow") r = await searchStackOverflow({ ghLanguage, profQuery });
-      else if (src === "hackernews") r = await searchHackerNews({ profQuery, mustHave: ctx.must_have });
-      else if (src === "xray-linkedin" || src === "xray-github") {
+      const xrayParams = { profQuery: query, mustHave: ctx.must_have, ghLocation: location, ghExpYears };
+      if (src === "github") r = await searchGitHubUsers({ ghLanguage, ghLocation: location, ghMinFollowers, ghExpYears });
+      else if (src === "stackoverflow") r = await searchStackOverflow({ ghLanguage, profQuery: query });
+      else if (src === "hackernews") r = await searchHackerNews({ profQuery: query, mustHave: ctx.must_have });
+      else if (src === "linkedin-live") r = await searchLinkedInCandidates({ query, location });
+      else if (src === "google-live") r = await searchGoogleResults({ query: `${query} ${location} (site:linkedin.com/in OR resume OR profile)`.trim() });
+      else if (src === "auto") {
+        const [gh, li, go] = await Promise.allSettled([
+          searchGitHubUsers({ ghLanguage, ghLocation: location, ghMinFollowers, ghExpYears }),
+          searchLinkedInCandidates({ query, location }),
+          searchGoogleResults({ query: `${query} ${location} (site:linkedin.com/in OR resume OR profile)`.trim() }),
+        ]);
+        const warnings = [];
+        if (gh.status === "fulfilled") r = r.concat(gh.value); else warnings.push(`GitHub: ${gh.reason?.message || gh.reason}`);
+        if (li.status === "fulfilled") r = r.concat(li.value); else warnings.push(`LinkedIn: ${li.reason?.message || li.reason}`);
+        if (go.status === "fulfilled") r = r.concat(go.value); else warnings.push(`Google: ${go.reason?.message || go.reason}`);
+        if (warnings.length) setProfWarning(warnings.join(" · "));
+      } else if (src === "xray-linkedin" || src === "xray-github") {
         const queries = [];
         if (src === "xray-linkedin") {
           queries.push({ label: "LinkedIn /in profiles", q: buildXRayQuery("linkedin.com", xrayParams) });
           queries.push({ label: "LinkedIn /pub (older)", q: buildXRayQuery("linkedin.com", xrayParams).replace("/in", "/pub") });
           queries.push({ label: "Naukri (India)", q: buildXRayQuery("naukri.com", xrayParams) });
-          queries.push({ label: "Resumes (PDF/DOC)", q: `(filetype:pdf OR filetype:doc OR filetype:docx) (resume OR CV) ${(ctx.must_have || []).slice(0, 3).map((s) => `"${s}"`).join(" ")} ${ghLocation ? `"${ghLocation}"` : ""}` });
+          queries.push({ label: "Resumes (PDF/DOC)", q: `(filetype:pdf OR filetype:doc OR filetype:docx) (resume OR CV) ${(ctx.must_have || []).slice(0, 3).map((s) => `"${s}"`).join(" ")} ${location ? `"${location}"` : ""}` });
+          queries.push({ label: "Facebook Communities", q: `site:facebook.com (group OR community OR jobs) ${(ctx.must_have || []).slice(0, 3).map((s) => `"${s}"`).join(" ")} ${location ? `"${location}"` : ""}` });
         } else {
           queries.push({ label: "GitHub profiles", q: buildXRayQuery("github.com", xrayParams) });
           queries.push({ label: "GitHub gists", q: buildXRayQuery("gist.github.com", xrayParams) });
@@ -246,6 +271,17 @@ export default function App() {
     if (p.username) setEmailUser(p.username);
     if (p.name) setEmailFullName(p.name);
     if (goToTab) setTab(goToTab);
+
+    /* Auto-scan: clicking through to Email + Social should already be
+       looking up contact info, not wait for a second manual click. */
+    if (goToTab === "email") {
+      if (p.source === "linkedin" && p.profile_url && getStoredKey("apify")) {
+        setEmailLinkedInUrl(p.profile_url);
+        enrichViaApify(p.profile_url);
+      } else if (p.username) {
+        findEmail(p.username);
+      }
+    }
   }
 
   function saveCandidate(p) {
@@ -254,11 +290,11 @@ export default function App() {
   }
 
   /* Email + Social */
-  async function findEmail() {
+  async function findEmail(userOverride) {
     setEmailError(""); setEmailLoading(true); setEmailResult(null);
     try {
-      if (!emailUser.trim()) throw new Error("Enter a username");
-      const u = emailUser.trim();
+      const u = (userOverride || emailUser).trim();
+      if (!u) throw new Error("Enter a username");
       const [gh, rd, dv, hn] = await Promise.all([
         ghEmailLookup(u).catch((e) => ({ emails: [], profile: null, error: e.message })),
         redditLookup(u), devtoLookup(u), hnUserLookup(u),
@@ -281,10 +317,10 @@ export default function App() {
     }
   }
 
-  async function enrichViaApify() {
+  async function enrichViaApify(inputOverride) {
     setApifyProfError(""); setApifyProfLoading(true); setApifyProfResult(null);
     try {
-      const input = emailLinkedInUrl.trim() || emailUser.trim();
+      const input = (inputOverride || emailLinkedInUrl || emailUser).trim();
       if (!input) throw new Error("Enter a LinkedIn URL or username");
       const profile = await scrapeLinkedInProfile(input);
       setApifyProfResult(profile);
@@ -312,7 +348,7 @@ export default function App() {
         <ContextBar ctx={ctx} picked={picked} resetCtx={resetCtx} clearPicked={clearPicked} updateCtxField={updateCtxField} />
 
         {tab === "jd" && (<JDIntelTab jdMode={jdMode} setJdMode={setJdMode} jd={jd} setJd={setJd} jdUrl={jdUrl} setJdUrl={setJdUrl} jdLoading={jdLoading} jdResult={jdResult} jdError={jdError} analyseJD={analyseJD} setTab={setTab} updateCtxField={updateCtxField} updateJdField={updateJdField} />)}
-        {tab === "profiles" && (<ProfileFinderTab profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} ghLanguage={ghLanguage} setGhLanguage={setGhLanguage} ghMinFollowers={ghMinFollowers} setGhMinFollowers={setGhMinFollowers} ghExpYears={ghExpYears} setGhExpYears={setGhExpYears} profSrc={profSrc} profResults={profResults} profLoading={profLoading} profError={profError} profFetched={profFetched} findProfiles={findProfiles} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} ctx={ctx} country={countryObj} />)}
+        {tab === "profiles" && (<ProfileFinderTab profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} ghLanguage={ghLanguage} setGhLanguage={setGhLanguage} ghMinFollowers={ghMinFollowers} setGhMinFollowers={setGhMinFollowers} ghExpYears={ghExpYears} setGhExpYears={setGhExpYears} profSrc={profSrc} profResults={profResults} profLoading={profLoading} profError={profError} profWarning={profWarning} profFetched={profFetched} findProfiles={findProfiles} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} ctx={ctx} country={countryObj} />)}
         {tab === "email" && (<EmailFinderTab emailUser={emailUser} setEmailUser={setEmailUser} emailFullName={emailFullName} setEmailFullName={setEmailFullName} emailLoading={emailLoading} emailResult={emailResult} emailError={emailError} findEmail={findEmail} picked={picked} emailLinkedInUrl={emailLinkedInUrl} setEmailLinkedInUrl={setEmailLinkedInUrl} apifyProfLoading={apifyProfLoading} apifyProfResult={apifyProfResult} apifyProfError={apifyProfError} enrichViaApify={enrichViaApify} />)}
 
         <Footer />

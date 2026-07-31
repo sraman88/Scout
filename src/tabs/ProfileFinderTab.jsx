@@ -2,7 +2,7 @@ import { T } from "../theme.js";
 import { Card, FieldLabel, TextArea, TextInput, Row, Field, Divider, SourceBtn, ErrBox, Empty, LoadingPulse, MicroBtn, Badge, CopyBtn } from "../components/ui.jsx";
 import { chip, miniBtn } from "../components/styleHelpers.js";
 
-export function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLocation, ghLanguage, setGhLanguage, ghMinFollowers, setGhMinFollowers, ghExpYears, setGhExpYears, profSrc, profResults, profLoading, profError, profFetched, findProfiles, pickCandidate, saveCandidate, saved, ctx, country }) {
+export function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLocation, ghLanguage, setGhLanguage, ghMinFollowers, setGhMinFollowers, ghExpYears, setGhExpYears, profSrc, profResults, profLoading, profError, profWarning, profFetched, findProfiles, pickCandidate, saveCandidate, saved, ctx, country }) {
   const quickSkills = ctx.must_have.slice(0, 6);
   const indianLocations = ["Bangalore, India", "Hyderabad, India", "Pune, India", "Mumbai, India", "Chennai, India", "Delhi, India", "Gurgaon, India", "Noida, India"];
   const globalLocations = ["Remote", "San Francisco", "New York", "London", "Berlin", "Singapore", "Toronto"];
@@ -49,12 +49,16 @@ export function ProfileFinderTab({ profQuery, setProfQuery, ghLocation, setGhLoc
         </Row>
         <Divider label="SELECT SOURCE" />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <SourceBtn active={profSrc === "auto"} onClick={() => findProfiles("auto")}>● AUTO (LINKEDIN+GITHUB+GOOGLE)</SourceBtn>
+          <SourceBtn active={profSrc === "linkedin-live"} onClick={() => findProfiles("linkedin-live")}>● LINKEDIN (LIVE)</SourceBtn>
+          <SourceBtn active={profSrc === "google-live"} onClick={() => findProfiles("google-live")}>● GOOGLE (LIVE)</SourceBtn>
           <SourceBtn active={profSrc === "github"} onClick={() => findProfiles("github")}>● GITHUB</SourceBtn>
           <SourceBtn active={profSrc === "stackoverflow"} onClick={() => findProfiles("stackoverflow")}>● STACK OVERFLOW</SourceBtn>
           <SourceBtn active={profSrc === "hackernews"} onClick={() => findProfiles("hackernews")}>● HACKER NEWS</SourceBtn>
-          <SourceBtn active={profSrc === "xray-linkedin"} onClick={() => findProfiles("xray-linkedin")}>● X-RAY LINKEDIN+</SourceBtn>
+          <SourceBtn active={profSrc === "xray-linkedin"} onClick={() => findProfiles("xray-linkedin")}>● X-RAY LINKEDIN+FB</SourceBtn>
           <SourceBtn active={profSrc === "xray-github"} onClick={() => findProfiles("xray-github")}>● X-RAY GITHUB+DEV.TO+X</SourceBtn>
         </div>
+        {profWarning && <div style={{ marginTop: 10, padding: "8px 12px", background: `${T.amber}11`, border: `1px solid ${T.amber}44`, borderRadius: 6, color: T.amber, fontFamily: T.mono, fontSize: 11, lineHeight: 1.5 }}>{profWarning}</div>}
         {profError && <ErrBox>{profError}</ErrBox>}
       </Card>
 

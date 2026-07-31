@@ -12,7 +12,7 @@ export function EmailFinderTab({ emailUser, setEmailUser, emailFullName, setEmai
           <Field><FieldLabel>Full Name (for X-Ray)</FieldLabel><TextInput value={emailFullName} onChange={(e) => setEmailFullName(e.target.value)} placeholder="Linus Torvalds" /></Field>
         </Row>
         {picked && <div style={{ marginTop: 8, padding: "8px 12px", background: `${T.purple}11`, border: `1px solid ${T.purple}33`, borderRadius: 6, fontSize: 12, color: T.text2 }}><span style={{ color: T.purple, fontWeight: 700 }}>FROM PROFILE: </span>{picked.name} (@{picked.username}) · auto-filled</div>}
-        <PrimaryBtn onClick={findEmail} disabled={emailLoading} style={{ marginTop: 14 }}>{emailLoading ? "SCANNING..." : "→ SCAN ALL SOURCES"}</PrimaryBtn>
+        <PrimaryBtn onClick={() => findEmail()} disabled={emailLoading} style={{ marginTop: 14 }}>{emailLoading ? "SCANNING..." : "→ SCAN ALL SOURCES"}</PrimaryBtn>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
           <span style={{ fontFamily: T.mono, fontSize: 10, color: T.text3, letterSpacing: 1.5, alignSelf: "center" }}>SCANS:</span>
           {["GitHub profile", "Push commits", "Repo commits", "Reddit", "Dev.to", "Hacker News", "X-Ray (LinkedIn/X/Facebook/Instagram)"].map((s) => <span key={s} style={{ padding: "3px 8px", background: T.bg3, border: `1px solid ${T.cyanDim}`, borderRadius: 4, fontFamily: T.mono, fontSize: 10, color: T.text2 }}>{s}</span>)}
@@ -29,7 +29,7 @@ export function EmailFinderTab({ emailUser, setEmailUser, emailFullName, setEmai
         <Row>
           <Field><FieldLabel>LinkedIn Profile URL or Username</FieldLabel><TextInput value={emailLinkedInUrl} onChange={(e) => setEmailLinkedInUrl(e.target.value)} placeholder="https://linkedin.com/in/username OR just username" /></Field>
         </Row>
-        <PrimaryBtn onClick={enrichViaApify} disabled={apifyProfLoading || !hasApify} style={{ marginTop: 14 }}>
+        <PrimaryBtn onClick={() => enrichViaApify()} disabled={apifyProfLoading || !hasApify} style={{ marginTop: 14 }}>
           {apifyProfLoading ? "SCRAPING LINKEDIN..." : "→ APIFY ENRICH (Profile + Email)"}
         </PrimaryBtn>
         {apifyProfError && <ErrBox>{apifyProfError}</ErrBox>}

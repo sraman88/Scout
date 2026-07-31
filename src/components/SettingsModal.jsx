@@ -9,6 +9,8 @@ export function SettingsModal({ close, provider, setProvider }) {
   const [gh, setGh] = useState(getStoredKey("github"));
   const [apify, setApify] = useState(getStoredKey("apify"));
   const [apifyProfileActor, setApifyProfileActor] = useState(getStoredKey("apify_profile_actor") || "dev_fusion~linkedin-profile-scraper");
+  const [apifySearchActor, setApifySearchActor] = useState(getStoredKey("apify_search_actor") || "harvestapi~linkedin-profile-search");
+  const [apifyGoogleActor, setApifyGoogleActor] = useState(getStoredKey("apify_google_actor") || "apify~google-search-scraper");
 
   function save() {
     setStoredKey("groq", groq.trim());
@@ -16,10 +18,12 @@ export function SettingsModal({ close, provider, setProvider }) {
     setStoredKey("github", gh.trim());
     setStoredKey("apify", apify.trim());
     setStoredKey("apify_profile_actor", apifyProfileActor.trim());
+    setStoredKey("apify_search_actor", apifySearchActor.trim());
+    setStoredKey("apify_google_actor", apifyGoogleActor.trim());
     setStoredKey("onboarding_done", "1");
     close();
   }
-  function clearAll() { ["groq", "gemini", "github", "apify", "apify_profile_actor", "onboarding_done"].forEach((k) => setStoredKey(k, "")); setGroq(""); setGemini(""); setGh(""); setApify(""); }
+  function clearAll() { ["groq", "gemini", "github", "apify", "apify_profile_actor", "apify_search_actor", "apify_google_actor", "onboarding_done"].forEach((k) => setStoredKey(k, "")); setGroq(""); setGemini(""); setGh(""); setApify(""); }
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, backdropFilter: "blur(4px)" }} onClick={close}>
@@ -59,6 +63,13 @@ export function SettingsModal({ close, provider, setProvider }) {
         <TextInput value={apifyProfileActor} onChange={(e) => setApifyProfileActor(e.target.value)} placeholder="dev_fusion~linkedin-profile-scraper" />
         <p style={{ color: T.text3, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
           Browse actors at <a href="https://apify.com/store" target="_blank" rel="noreferrer">apify.com/store</a> — search "LinkedIn Profile Scraper + Email". Copy the actor ID (format: <span style={{ fontFamily: T.mono, color: T.cyan }}>author~actor-name</span>). Costs ~$0.02-0.10 per lookup; free tier gives $5/mo (50-250 lookups).
+        </p>
+        <FieldLabel style={{ marginTop: 8 }}>APIFY LINKEDIN SEARCH ACTOR ID (for candidate search, not single-profile lookup)</FieldLabel>
+        <TextInput value={apifySearchActor} onChange={(e) => setApifySearchActor(e.target.value)} placeholder="harvestapi~linkedin-profile-search" />
+        <FieldLabel style={{ marginTop: 8 }}>APIFY GOOGLE SEARCH ACTOR ID</FieldLabel>
+        <TextInput value={apifyGoogleActor} onChange={(e) => setApifyGoogleActor(e.target.value)} placeholder="apify~google-search-scraper" />
+        <p style={{ color: T.text3, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+          These two power the auto-populated Profiles feed after a JD is analysed. LinkedIn search costs ~$0.10/search page; Google search is near-free on Apify's free tier. Both need the same Apify token above.
         </p>
         <FieldLabel style={{ marginTop: 16 }}>PREFERRED LLM PROVIDER</FieldLabel>
         <div style={{ display: "flex", gap: 6 }}>
