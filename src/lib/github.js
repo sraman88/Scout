@@ -30,7 +30,7 @@ export async function searchGitHubUsers({ ghLanguage, ghLocation, ghMinFollowers
   const items = data.items || [];
   const enriched = await Promise.all(items.slice(0, 12).map(async (u) => {
     try {
-      const r = await fetch(`https://api.github.com/users/${u.login}`, { headers: ghHeaders() });
+      const r = await fetch(`https://api.github.com/users/${encodeURIComponent(u.login)}`, { headers: ghHeaders() });
       if (!r.ok) return null;
       const p = await r.json();
       return {
@@ -48,8 +48,9 @@ export async function searchGitHubUsers({ ghLanguage, ghLocation, ghMinFollowers
 export async function ghEmailLookup(username) {
   const found = new Set();
   let profile = null;
+  const u = encodeURIComponent(username);
   try {
-    const r = await fetch(`https://api.github.com/users/${username}`, { headers: ghHeaders() });
+    const r = await fetch(`https://api.github.com/users/${u}`, { headers: ghHeaders() });
     if (r.ok) {
       profile = await r.json();
       if (profile.email && !profile.email.includes("noreply")) found.add(profile.email);
@@ -57,7 +58,7 @@ export async function ghEmailLookup(username) {
     else if (r.status === 403) throw new Error("GitHub rate-limited. Add a token in Settings.");
   } catch (e) { if (!profile) throw e; }
   try {
-    const r = await fetch(`https://api.github.com/users/${username}/events/public?per_page=100`, { headers: ghHeaders() });
+    const r = await fetch(`https://api.github.com/users/${u}/events/public?per_page=100`, { headers: ghHeaders() });
     if (r.ok) {
       const events = await r.json();
       events.forEach((ev) => {
@@ -71,12 +72,12 @@ export async function ghEmailLookup(username) {
     }
   } catch { /* events endpoint unavailable */ }
   try {
-    const rr = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=5`, { headers: ghHeaders() });
+    const rr = await fetch(`https://api.github.com/users/${u}/repos?sort=updated&per_page=5`, { headers: ghHeaders() });
     if (rr.ok) {
       const repos = await rr.json();
       for (const repo of repos.slice(0, 5)) {
         try {
-          const cr = await fetch(`https://api.github.com/repos/${username}/${repo.name}/commits?author=${username}&per_page=3`, { headers: ghHeaders() });
+          const cr = await fetch(`https://api.github.com/repos/${u}/${encodeURIComponent(repo.name)}/commits?author=${u}&per_page=3`, { headers: ghHeaders() });
           if (!cr.ok) continue;
           const commits = await cr.json();
           commits.forEach((c) => {

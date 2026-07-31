@@ -52,13 +52,13 @@ export function SettingsModal({ close, provider, setProvider }) {
           · Apify: <a href="https://console.apify.com/account/integrations" target="_blank" rel="noreferrer">console.apify.com/account/integrations</a> ($5/mo free credit)
         </p>
         <FieldLabel>GROQ API KEY</FieldLabel>
-        <TextInput type="password" value={groq} onChange={(e) => setGroq(e.target.value)} placeholder="gsk_..." />
+        <TextInput type="password" autoComplete="off" value={groq} onChange={(e) => setGroq(e.target.value)} placeholder="gsk_..." />
         <FieldLabel style={{ marginTop: 10 }}>GOOGLE GEMINI API KEY</FieldLabel>
-        <TextInput type="password" value={gemini} onChange={(e) => setGemini(e.target.value)} placeholder="AIza..." />
+        <TextInput type="password" autoComplete="off" value={gemini} onChange={(e) => setGemini(e.target.value)} placeholder="AIza..." />
         <FieldLabel style={{ marginTop: 10 }}>GITHUB TOKEN (recommended — 60→5000/hr)</FieldLabel>
-        <TextInput type="password" value={gh} onChange={(e) => setGh(e.target.value)} placeholder="ghp_..." />
+        <TextInput type="password" autoComplete="off" value={gh} onChange={(e) => setGh(e.target.value)} placeholder="ghp_..." />
         <FieldLabel style={{ marginTop: 10 }}>APIFY API TOKEN (for LinkedIn profile scraping)</FieldLabel>
-        <TextInput type="password" value={apify} onChange={(e) => setApify(e.target.value)} placeholder="apify_api_..." />
+        <TextInput type="password" autoComplete="off" value={apify} onChange={(e) => setApify(e.target.value)} placeholder="apify_api_..." />
         <FieldLabel style={{ marginTop: 8 }}>APIFY LINKEDIN PROFILE + EMAIL ACTOR ID</FieldLabel>
         <TextInput value={apifyProfileActor} onChange={(e) => setApifyProfileActor(e.target.value)} placeholder="dev_fusion~linkedin-profile-scraper" />
         <p style={{ color: T.text3, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>

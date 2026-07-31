@@ -12,9 +12,10 @@ export async function searchHackerNews({ profQuery, mustHave }) {
 }
 
 export async function hnUserLookup(username) {
-  const out = { found: false, karma: null, recent: [], url: `https://news.ycombinator.com/user?id=${username}` };
+  const u = encodeURIComponent(username);
+  const out = { found: false, karma: null, recent: [], url: `https://news.ycombinator.com/user?id=${u}` };
   try {
-    const r = await fetch(`https://hacker-news.firebaseio.com/v0/user/${username}.json`);
+    const r = await fetch(`https://hacker-news.firebaseio.com/v0/user/${u}.json`);
     if (!r.ok) return out;
     const data = await r.json();
     if (data && data.id) {

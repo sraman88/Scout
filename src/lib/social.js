@@ -1,9 +1,10 @@
 import { proxyFetch } from "./proxyFetch.js";
 
 export async function redditLookup(username) {
-  const out = { found: false, karma: null, age: null, subs: [], recent_posts: [], url: `https://www.reddit.com/user/${username}/` };
+  const u = encodeURIComponent(username);
+  const out = { found: false, karma: null, age: null, subs: [], recent_posts: [], url: `https://www.reddit.com/user/${u}/` };
   try {
-    const aboutRaw = await proxyFetch(`https://www.reddit.com/user/${username}/about.json`);
+    const aboutRaw = await proxyFetch(`https://www.reddit.com/user/${u}/about.json`);
     const about = JSON.parse(aboutRaw);
     if (about?.data?.name) {
       out.found = true;
@@ -11,7 +12,7 @@ export async function redditLookup(username) {
       out.age = new Date(about.data.created_utc * 1000).getFullYear();
     }
     try {
-      const submittedRaw = await proxyFetch(`https://www.reddit.com/user/${username}/submitted.json?limit=20`);
+      const submittedRaw = await proxyFetch(`https://www.reddit.com/user/${u}/submitted.json?limit=20`);
       const submitted = JSON.parse(submittedRaw);
       const subs = new Set();
       const posts = [];
