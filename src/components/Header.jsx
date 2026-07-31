@@ -1,10 +1,12 @@
 import { T, COUNTRIES, ENV_GROQ, ENV_GH, ENV_GEMINI } from "../theme.js";
 import { getStoredKey } from "../lib/storage.js";
+import { useAuth } from "../lib/authContext.js";
 
 export function Header({ provider, setProvider, country, setCountry, openSettings }) {
   const hasGroq = !!(getStoredKey("groq") || ENV_GROQ);
   const hasGemini = !!(getStoredKey("gemini") || ENV_GEMINI);
   const hasGH = !!(getStoredKey("github") || ENV_GH);
+  const { user, signOut } = useAuth();
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -23,6 +25,15 @@ export function Header({ provider, setProvider, country, setCountry, openSetting
           {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
         </select>
         <button onClick={openSettings} style={{ padding: "7px 12px", background: T.bg2, color: T.text, border: `1px solid ${T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>⚙ SETTINGS {!hasGH ? "(GH ⚠)" : ""}</button>
+        {user && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px 4px 4px", background: T.bg2, border: `1px solid ${T.cyanDim}`, borderRadius: 7 }}>
+            {user.photoURL
+              ? <img src={user.photoURL} alt="" style={{ width: 22, height: 22, borderRadius: 999 }} />
+              : <div style={{ width: 22, height: 22, borderRadius: 999, background: T.cyanDim, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: T.cyan }}>{(user.email || "?").slice(0, 1).toUpperCase()}</div>}
+            <span style={{ fontFamily: T.mono, fontSize: 11, color: T.text2, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</span>
+            <button onClick={() => signOut()} style={{ background: "transparent", border: "none", color: T.text3, fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: 1 }} title="Sign out">SIGN OUT</button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -36,7 +36,7 @@ export function SettingsModal({ close, provider, setProvider }) {
           <div style={{ padding: 14, background: `linear-gradient(135deg, ${T.cyan}15, ${T.purple}15)`, border: `1px solid ${T.cyan}`, borderRadius: 10, marginBottom: 16 }}>
             <div style={{ fontFamily: T.display, fontSize: 18, fontWeight: 800, color: T.cyan, marginBottom: 6 }}>👋 Welcome to SCOUT</div>
             <div style={{ color: T.text, fontSize: 13, lineHeight: 1.6 }}>
-              This app runs entirely in your browser — nothing is sent to a server. Your keys stay in your browser's localStorage <strong style={{ color: T.cyan }}>forever</strong> on this device. Enter them once below and SCOUT is yours.
+              Your keys are saved to <strong style={{ color: T.cyan }}>your signed-in Google account</strong> (via Firestore) and follow you across browsers and devices — nobody else can see them, and you won't see anyone else's. Enter them once below and SCOUT is yours everywhere you sign in.
               <br /><br />
               <strong style={{ color: T.green }}>Minimum to start:</strong> one LLM key (Groq is fastest and free).<br />
               <strong style={{ color: T.amber }}>Recommended:</strong> also add a GitHub token to lift the rate limit 60→5000/hr.<br />
@@ -45,7 +45,7 @@ export function SettingsModal({ close, provider, setProvider }) {
           </div>
         )}
         <p style={{ color: T.text2, fontSize: 13, marginBottom: 18, lineHeight: 1.6 }}>
-          Keys stored in browser localStorage only — never sent anywhere except the official APIs. Get free keys at:<br />
+          Keys sync to your Google account — never sent anywhere except the official APIs and your own Firebase project. Get free keys at:<br />
           · Groq: <a href="https://console.groq.com" target="_blank" rel="noreferrer">console.groq.com</a><br />
           · Gemini: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a><br />
           · GitHub: <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">github.com/settings/tokens</a> (classic token, no scopes needed)<br />
