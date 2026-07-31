@@ -8,7 +8,7 @@ import { searchStackOverflow } from "./lib/stackoverflow.js";
 import { searchHackerNews, hnUserLookup } from "./lib/hackernews.js";
 import { redditLookup, devtoLookup, buildXRayQuery, buildEmailXRays } from "./lib/social.js";
 import { scrapeLinkedInProfile } from "./lib/apify.js";
-import { searchLinkedInCandidates, searchGoogleResults } from "./lib/apifySearch.js";
+import { searchLinkedInCandidates, searchGoogleResults, fetchUrlContent } from "./lib/apifySearch.js";
 import { Header } from "./components/Header.jsx";
 import { Tabs } from "./components/Tabs.jsx";
 import { ContextBar } from "./components/ContextBar.jsx";
@@ -138,21 +138,35 @@ export default function App() {
       if (jdMode === "url") {
         if (!jdUrl.trim()) throw new Error("Paste a URL first");
         const isLI = /linkedin\.com/i.test(jdUrl);
-        let raw;
+        const url = jdUrl.trim();
+        let proxyErr = null;
         try {
-          raw = await proxyFetch(jdUrl.trim());
+          const raw = await proxyFetch(url);
+          const stripped = raw
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+            .replace(/\s+/g, " ").trim();
+          if (stripped.length < 200) throw new Error("returned too little content (likely a JS-rendered page)");
+          text = stripped;
         } catch (e) {
-          throw new Error(isLI
-            ? "LinkedIn job pages block fetching. Copy the JD text and use Paste mode."
-            : `All 3 CORS proxies failed: ${e.message}. Paste the JD text instead.`, { cause: e });
+          proxyErr = e;
         }
-        text = raw
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-          .replace(/\s+/g, " ").trim();
-        if (text.length < 200) throw new Error(isLI ? "LinkedIn blocked the fetch. Use paste mode." : "Too little content. Use paste mode.");
+        /* CORS-proxied plain-HTML fetch can't see JS-rendered career pages
+           (Greenhouse, Lever, Workday, LinkedIn...) — fall back to a real
+           headless-browser fetch via Apify if a token is configured. */
+        if (proxyErr && getStoredKey("apify")) {
+          try {
+            text = await fetchUrlContent(url);
+          } catch (e2) {
+            throw new Error(`Couldn't fetch this page (proxy: ${proxyErr.message}; browser fetch: ${e2.message}). Paste the JD text instead.`, { cause: e2 });
+          }
+        } else if (proxyErr) {
+          throw new Error(isLI
+            ? "LinkedIn job pages block fetching. Copy the JD text and use Paste mode, or add an Apify token in Settings for browser-based fetching."
+            : `Couldn't fetch this page (${proxyErr.message}). Paste the JD text instead, or add an Apify token in Settings for more reliable fetching of JS-rendered career pages.`, { cause: proxyErr });
+        }
         if (text.length > 8000) text = text.slice(0, 8000);
       }
       if (!text.trim()) throw new Error("No JD content");
@@ -228,16 +242,24 @@ export default function App() {
       else if (src === "linkedin-live") r = await searchLinkedInCandidates({ query, location });
       else if (src === "google-live") r = await searchGoogleResults({ query: `${query} ${location} (site:linkedin.com/in OR resume OR profile)`.trim() });
       else if (src === "auto") {
-        const [gh, li, go] = await Promise.allSettled([
-          searchGitHubUsers({ ghLanguage, ghLocation: location, ghMinFollowers, ghExpYears }),
-          searchLinkedInCandidates({ query, location }),
-          searchGoogleResults({ query: `${query} ${location} (site:linkedin.com/in OR resume OR profile)`.trim() }),
-        ]);
+        /* Each source appends its results as soon as it resolves instead of
+           waiting for all three — GitHub/Google usually answer in a few
+           seconds, LinkedIn's real scrape can take much longer, and nobody
+           should stare at a blank screen for a minute+ waiting on the
+           slowest one. maxItems/timeout are kept small here specifically
+           for the auto-triggered run; the manual "LINKEDIN (LIVE)" button
+           still runs the fuller search. */
         const warnings = [];
-        if (gh.status === "fulfilled") r = r.concat(gh.value); else warnings.push(`GitHub: ${gh.reason?.message || gh.reason}`);
-        if (li.status === "fulfilled") r = r.concat(li.value); else warnings.push(`LinkedIn: ${li.reason?.message || li.reason}`);
-        if (go.status === "fulfilled") r = r.concat(go.value); else warnings.push(`Google: ${go.reason?.message || go.reason}`);
+        const tasks = [
+          { label: "GitHub", p: searchGitHubUsers({ ghLanguage, ghLocation: location, ghMinFollowers, ghExpYears }) },
+          { label: "LinkedIn", p: searchLinkedInCandidates({ query, location, maxItems: 10, timeout: 60 }) },
+          { label: "Google", p: searchGoogleResults({ query: `${query} ${location} (site:linkedin.com/in OR resume OR profile)`.trim() }) },
+        ];
+        await Promise.all(tasks.map(({ label, p }) => p
+          .then((items) => setProfResults((prev) => [...prev, ...items]))
+          .catch((e) => warnings.push(`${label}: ${e.message || e}`))));
         if (warnings.length) setProfWarning(warnings.join(" · "));
+        return;
       } else if (src === "xray-linkedin" || src === "xray-github") {
         const queries = [];
         if (src === "xray-linkedin") {

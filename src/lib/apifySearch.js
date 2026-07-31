@@ -17,7 +17,7 @@ async function runActor(actor, token, input, timeout = 90) {
    single-profile lookup — used to auto-populate the Profiles tab from a
    parsed JD. Same account token as the profile-scraper actor; different
    actor since search and single-profile lookup are separate Apify actors. */
-export async function searchLinkedInCandidates({ query, location, maxItems = 20 }) {
+export async function searchLinkedInCandidates({ query, location, maxItems = 20, timeout = 90 }) {
   const token = getStoredKey("apify");
   if (!token) throw new Error("Apify token missing — open Settings to enable live LinkedIn search");
   const actor = (getStoredKey("apify_search_actor") || "harvestapi~linkedin-profile-search").trim();
@@ -27,7 +27,7 @@ export async function searchLinkedInCandidates({ query, location, maxItems = 20 
     profileScraperMode: "Short",
     maxItems,
   };
-  const data = await runActor(actor, token, input, 120);
+  const data = await runActor(actor, token, input, timeout);
   if (!Array.isArray(data)) return [];
   return data
     .filter((item) => !item.error && item.succeeded !== false)
@@ -66,4 +66,19 @@ export async function searchGoogleResults({ query, maxResults = 10 }) {
     bio: asText(r.description),
     profile_url: r.url || "",
   }));
+}
+
+/* Fetches a URL through a real headless browser (handles JS-rendered career
+   pages that the plain CORS-proxy chain in proxyFetch.js can't see) and
+   returns clean extracted text. Used as a fallback when the free CORS-proxy
+   fetch fails or comes back with too little content. */
+export async function fetchUrlContent(url) {
+  const token = getStoredKey("apify");
+  if (!token) throw new Error("Apify token missing — open Settings to enable browser-based URL fetching");
+  const actor = (getStoredKey("apify_browser_actor") || "apify~rag-web-browser").trim();
+  const data = await runActor(actor, token, { query: url }, 60);
+  if (!Array.isArray(data) || data.length === 0) throw new Error("Apify browser fetch returned no content for this URL");
+  const text = asText(data[0]?.markdown) || asText(data[0]?.text);
+  if (!text) throw new Error("Apify browser fetch returned an empty page");
+  return text;
 }
