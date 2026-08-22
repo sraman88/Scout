@@ -1,6 +1,11 @@
 import { getStoredKey } from "./storage.js";
 import { asText, asArray } from "./normalize.js";
 
+/* harvestapi actors validate this against the exact label text shown in
+   their pricing UI, not a short code — "Short" alone 400s with
+   invalid-input ("must be equal to one of the allowed values"). */
+const PROFILE_MODE_SHORT = "Short ($4 per 1k)";
+
 async function runActor(actor, token, input, timeout = 90) {
   const apiUrl = `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items?token=${token}&timeout=${timeout}`;
   const res = await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
@@ -24,7 +29,7 @@ export async function searchLinkedInCandidates({ query, location, maxItems = 20,
   const input = {
     searchQuery: query || "",
     locations: location ? [location] : [],
-    profileScraperMode: "Short",
+    profileScraperMode: PROFILE_MODE_SHORT,
     maxItems,
   };
   const data = await runActor(actor, token, input, timeout);
@@ -93,7 +98,7 @@ export async function searchCompanyEmployees({ companyDomain, companyName, title
     companies: [company],
     jobTitles: asArray(titles),
     locations: asArray(locations),
-    profileScraperMode: "Short",
+    profileScraperMode: PROFILE_MODE_SHORT,
     maxItems,
   };
   const data = await runActor(actor, token, input, 90);
