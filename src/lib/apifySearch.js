@@ -1,10 +1,14 @@
 import { getStoredKey } from "./storage.js";
 import { asText, asArray } from "./normalize.js";
 
-/* harvestapi actors validate this against the exact label text shown in
-   their pricing UI, not a short code — "Short" alone 400s with
-   invalid-input ("must be equal to one of the allowed values"). */
-const PROFILE_MODE_SHORT = "Short ($4 per 1k)";
+/* Different harvestapi actors validate profileScraperMode against different
+   enum formats — one wants the plain label ("Short"), another wants the
+   pricing-suffixed label ("Short ($4 per 1k)") — confirmed by two different
+   400 "invalid-input" responses quoting different allowed-value lists for
+   the same-named field on different actors. Rather than hardcode a value
+   per actor (which could drift again if harvestapi changes either schema),
+   try both and let whichever the actor actually accepts win. */
+const PROFILE_MODE_VARIANTS = ["Short", "Short ($4 per 1k)"];
 
 async function runActor(actor, token, input, timeout = 90) {
   const apiUrl = `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items?token=${token}&timeout=${timeout}`;
@@ -18,6 +22,21 @@ async function runActor(actor, token, input, timeout = 90) {
   return res.json();
 }
 
+/* Runs an actor whose input includes a profileScraperMode field, retrying
+   with each known-good variant until one is accepted. */
+async function runActorWithModeFallback(actor, token, baseInput, timeout) {
+  let lastErr;
+  for (const mode of PROFILE_MODE_VARIANTS) {
+    try {
+      return await runActor(actor, token, { ...baseInput, profileScraperMode: mode }, timeout);
+    } catch (e) {
+      lastErr = e;
+      if (!String(e.message).includes("profileScraperMode")) throw e;
+    }
+  }
+  throw lastErr;
+}
+
 /* Real LinkedIn candidate search (by keyword/title/location), not a
    single-profile lookup — used to auto-populate the Profiles tab from a
    parsed JD. Same account token as the profile-scraper actor; different
@@ -29,10 +48,9 @@ export async function searchLinkedInCandidates({ query, location, maxItems = 20,
   const input = {
     searchQuery: query || "",
     locations: location ? [location] : [],
-    profileScraperMode: PROFILE_MODE_SHORT,
     maxItems,
   };
-  const data = await runActor(actor, token, input, timeout);
+  const data = await runActorWithModeFallback(actor, token, input, timeout);
   if (!Array.isArray(data)) return [];
   return data
     .filter((item) => !item.error && item.succeeded !== false)
@@ -98,10 +116,9 @@ export async function searchCompanyEmployees({ companyDomain, companyName, title
     companies: [company],
     jobTitles: asArray(titles),
     locations: asArray(locations),
-    profileScraperMode: PROFILE_MODE_SHORT,
     maxItems,
   };
-  const data = await runActor(actor, token, input, 90);
+  const data = await runActorWithModeFallback(actor, token, input, 90);
   if (!Array.isArray(data)) return [];
   return data
     .filter((item) => !item.error && item.succeeded !== false)
