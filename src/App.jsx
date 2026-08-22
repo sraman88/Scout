@@ -212,6 +212,14 @@ export default function App() {
     }
   }
 
+  /* Same auto-advance destination as analyseJD's success path, but skips JD
+     parsing/the LLM call entirely — for when there's no JD to work from. */
+  function runKeywordSearch() {
+    if (!profQuery.trim()) return;
+    setTab("profiles");
+    findProfiles("auto", { query: profQuery, location: ghLocation || countryObj.default_loc });
+  }
+
   function updateJdField(field, value) {
     setJdResult((prev) => (prev ? { ...prev, [field]: value } : prev));
   }
@@ -370,7 +378,7 @@ export default function App() {
         <Tabs tab={tab} setTab={setTab} ctx={ctx} picked={picked} />
         <ContextBar ctx={ctx} picked={picked} resetCtx={resetCtx} clearPicked={clearPicked} updateCtxField={updateCtxField} />
 
-        {tab === "jd" && (<JDIntelTab jdMode={jdMode} setJdMode={setJdMode} jd={jd} setJd={setJd} jdUrl={jdUrl} setJdUrl={setJdUrl} jdLoading={jdLoading} jdResult={jdResult} jdError={jdError} analyseJD={analyseJD} setTab={setTab} updateCtxField={updateCtxField} updateJdField={updateJdField} />)}
+        {tab === "jd" && (<JDIntelTab jdMode={jdMode} setJdMode={setJdMode} jd={jd} setJd={setJd} jdUrl={jdUrl} setJdUrl={setJdUrl} jdLoading={jdLoading} jdResult={jdResult} jdError={jdError} analyseJD={analyseJD} setTab={setTab} updateCtxField={updateCtxField} updateJdField={updateJdField} profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} runKeywordSearch={runKeywordSearch} profLoading={profLoading} />)}
         {tab === "profiles" && (<ProfileFinderTab profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} ghLanguage={ghLanguage} setGhLanguage={setGhLanguage} ghMinFollowers={ghMinFollowers} setGhMinFollowers={setGhMinFollowers} ghExpYears={ghExpYears} setGhExpYears={setGhExpYears} profSrc={profSrc} profResults={profResults} profLoading={profLoading} profError={profError} profWarning={profWarning} profFetched={profFetched} findProfiles={findProfiles} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} ctx={ctx} country={countryObj} />)}
         {tab === "email" && (<EmailFinderTab emailUser={emailUser} setEmailUser={setEmailUser} emailFullName={emailFullName} setEmailFullName={setEmailFullName} emailLoading={emailLoading} emailResult={emailResult} emailError={emailError} findEmail={findEmail} picked={picked} emailLinkedInUrl={emailLinkedInUrl} setEmailLinkedInUrl={setEmailLinkedInUrl} apifyProfLoading={apifyProfLoading} apifyProfResult={apifyProfResult} apifyProfError={apifyProfError} enrichViaApify={enrichViaApify} />)}
         {tab === "xray" && (<CompanyXRayTab />)}

@@ -11,7 +11,7 @@ export function SettingsModal({ close, provider, setProvider }) {
   const [apifyProfileActor, setApifyProfileActor] = useState(getStoredKey("apify_profile_actor") || "dev_fusion~linkedin-profile-scraper");
   const [apifySearchActor, setApifySearchActor] = useState(getStoredKey("apify_search_actor") || "harvestapi~linkedin-profile-search");
   const [apifyGoogleActor, setApifyGoogleActor] = useState(getStoredKey("apify_google_actor") || "apify~google-search-scraper");
-  const [apollo, setApollo] = useState(getStoredKey("apollo"));
+  const [apifyCompanyActor, setApifyCompanyActor] = useState(getStoredKey("apify_company_actor") || "harvestapi~linkedin-company-employees");
 
   function save() {
     setStoredKey("groq", groq.trim());
@@ -21,11 +21,11 @@ export function SettingsModal({ close, provider, setProvider }) {
     setStoredKey("apify_profile_actor", apifyProfileActor.trim());
     setStoredKey("apify_search_actor", apifySearchActor.trim());
     setStoredKey("apify_google_actor", apifyGoogleActor.trim());
-    setStoredKey("apollo", apollo.trim());
+    setStoredKey("apify_company_actor", apifyCompanyActor.trim());
     setStoredKey("onboarding_done", "1");
     close();
   }
-  function clearAll() { ["groq", "gemini", "github", "apify", "apify_profile_actor", "apify_search_actor", "apify_google_actor", "apollo", "onboarding_done"].forEach((k) => setStoredKey(k, "")); setGroq(""); setGemini(""); setGh(""); setApify(""); setApollo(""); }
+  function clearAll() { ["groq", "gemini", "github", "apify", "apify_profile_actor", "apify_search_actor", "apify_google_actor", "apify_company_actor", "onboarding_done"].forEach((k) => setStoredKey(k, "")); setGroq(""); setGemini(""); setGh(""); setApify(""); }
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, backdropFilter: "blur(4px)" }} onClick={close}>
@@ -51,8 +51,7 @@ export function SettingsModal({ close, provider, setProvider }) {
           · Groq: <a href="https://console.groq.com" target="_blank" rel="noreferrer">console.groq.com</a><br />
           · Gemini: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a><br />
           · GitHub: <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">github.com/settings/tokens</a> (classic token, no scopes needed)<br />
-          · Apify: <a href="https://console.apify.com/account/integrations" target="_blank" rel="noreferrer">console.apify.com/account/integrations</a> ($5/mo free credit)<br />
-          · Apollo: <a href="https://app.apollo.io/#/settings/integrations/api" target="_blank" rel="noreferrer">app.apollo.io → Settings → API</a> (free tier available)
+          · Apify: <a href="https://console.apify.com/account/integrations" target="_blank" rel="noreferrer">console.apify.com/account/integrations</a> ($5/mo free credit)
         </p>
         <FieldLabel>GROQ API KEY</FieldLabel>
         <TextInput type="password" autoComplete="off" value={groq} onChange={(e) => setGroq(e.target.value)} placeholder="gsk_..." />
@@ -74,10 +73,10 @@ export function SettingsModal({ close, provider, setProvider }) {
         <p style={{ color: T.text3, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
           These two power the auto-populated Profiles feed after a JD is analysed. LinkedIn search costs ~$0.10/search page; Google search is near-free on Apify's free tier. Both need the same Apify token above.
         </p>
-        <FieldLabel style={{ marginTop: 10 }}>APOLLO API KEY (for Company X-Ray org mapping)</FieldLabel>
-        <TextInput type="password" autoComplete="off" value={apollo} onChange={(e) => setApollo(e.target.value)} placeholder="apollo key..." />
+        <FieldLabel style={{ marginTop: 8 }}>APIFY LINKEDIN COMPANY EMPLOYEES ACTOR ID (for Company X-Ray)</FieldLabel>
+        <TextInput value={apifyCompanyActor} onChange={(e) => setApifyCompanyActor(e.target.value)} placeholder="harvestapi~linkedin-company-employees" />
         <p style={{ color: T.text3, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
-          Only used by the Company X-Ray tab to map who works at a target company. Sent to our own <span style={{ fontFamily: T.mono, color: T.cyan }}>/api/xray</span> endpoint per-request, never stored server-side. Free tier available at apollo.io.
+          Powers the Company X-Ray tab (maps who works at a target company). Costs $0.004-0.012 per person depending on mode — same Apify token above, no separate account needed.
         </p>
         <FieldLabel style={{ marginTop: 16 }}>PREFERRED LLM PROVIDER</FieldLabel>
         <div style={{ display: "flex", gap: 6 }}>

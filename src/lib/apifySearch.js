@@ -68,6 +68,55 @@ export async function searchGoogleResults({ query, maxResults = 10 }) {
   }));
 }
 
+function guessCompanyInput(companyDomain, companyName) {
+  if (companyName && companyName.trim()) return companyName.trim();
+  if (companyDomain && companyDomain.trim()) {
+    const slug = companyDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[./]/)[0];
+    return `https://www.linkedin.com/company/${slug}`;
+  }
+  return "";
+}
+
+/* Company org-mapping (who works at a target company), replacing the earlier
+   Apollo-based /api/xray endpoint — Apollo's free plan has no API search
+   access at all (confirmed via their own API_INACCESSIBLE error), while this
+   Apify actor works with the same token already used for LinkedIn candidate
+   search above, at a fraction of the cost. Runs entirely client-side, so
+   (unlike the Apollo proxy) it also works with `npm run dev` locally. */
+export async function searchCompanyEmployees({ companyDomain, companyName, titles, locations, maxItems = 50 }) {
+  const token = getStoredKey("apify");
+  if (!token) throw new Error("Apify token missing — open Settings to enable Company X-Ray");
+  const actor = (getStoredKey("apify_company_actor") || "harvestapi~linkedin-company-employees").trim();
+  const company = guessCompanyInput(companyDomain, companyName);
+  if (!company) throw new Error("Provide a company domain or name");
+  const input = {
+    companies: [company],
+    jobTitles: asArray(titles),
+    locations: asArray(locations),
+    profileScraperMode: "Short",
+    maxItems,
+  };
+  const data = await runActor(actor, token, input, 90);
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((item) => !item.error && item.succeeded !== false)
+    .map((item) => {
+      const name = asText(item.fullName) || [item.firstName, item.lastName].filter(Boolean).join(" ") || "";
+      return {
+        id: item.publicIdentifier || item.linkedinUrl || name,
+        name: name || "—",
+        title: asText(item.headline) || asText(item.currentPosition?.position) || "",
+        seniority: item.seniorityLevel || item.seniority || "",
+        city: "",
+        state: "",
+        country: asText(item.location) || asText(item.geoLocation) || "",
+        org: asText(item.currentPosition?.companyName) || company,
+        linkedin: item.linkedinUrl || "",
+      };
+    })
+    .filter((p) => p.name !== "—" || p.linkedin);
+}
+
 /* Fetches a URL through a real headless browser (handles JS-rendered career
    pages that the plain CORS-proxy chain in proxyFetch.js can't see) and
    returns clean extracted text. Used as a fallback when the free CORS-proxy

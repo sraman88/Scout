@@ -2,15 +2,16 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { T } from "../theme.js";
 import { getStoredKey } from "../lib/storage.js";
 import { llmCall } from "../lib/llm.js";
+import { searchCompanyEmployees } from "../lib/apifySearch.js";
 import { Card, FieldLabel, TextInput, Row, Field, Divider, PrimaryBtn, MicroBtn, ErrBox, Empty, LoadingPulse, Badge } from "../components/ui.jsx";
 import { chip } from "../components/styleHelpers.js";
 
-/* Maps a target company's org for one function + geography via a people-data
-   provider (Apollo, through the /api/xray serverless proxy so the Apollo key
-   never reaches the browser network tab — it's forwarded per-request from
-   this component to our own origin, then from our origin to Apollo). */
+/* Maps a target company's org for one function + geography via
+   harvestapi~linkedin-company-employees on Apify — same token as the other
+   LinkedIn actors already in Settings, no separate provider account needed.
+   (Originally built against Apollo via a serverless proxy, but Apollo's free
+   plan has zero API search access — this replaces that entirely.) */
 
-const ENDPOINT = "/api/xray";
 const CACHE_PREFIX = "scout_xray_";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14d TTL, auto-expiring cache
 
@@ -24,8 +25,6 @@ const FUNCTION_TITLES = {
   HR: ["human resources", "talent acquisition", "recruiter", "hrbp", "people operations"],
   Finance: ["finance", "controller", "financial analyst", "fp&a", "accounts"],
 };
-
-const SENIORITY_OPTIONS = ["c_suite", "vp", "head", "director", "manager", "senior", "entry"];
 
 const TIER = {
   owner: "Leadership", founder: "Leadership", c_suite: "Leadership",
@@ -45,14 +44,13 @@ async function ensembleClusterTitles(prompt) {
 }
 
 export function CompanyXRayTab() {
-  const providerKey = getStoredKey("apollo");
+  const providerKey = getStoredKey("apify");
 
   const [companyDomain, setCompanyDomain] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [fn, setFn] = useState("Sales");
   const [locations, setLocations] = useState(["India"]);
-  const [seniorities, setSeniorities] = useState([]);
-  const [maxPages, setMaxPages] = useState(3);
+  const [maxItems, setMaxItems] = useState(50);
 
   const [people, setPeople] = useState([]);
   const [meta, setMeta] = useState(null);
@@ -130,37 +128,27 @@ export function CompanyXRayTab() {
   }, []);
 
   const run = useCallback(async () => {
-    if (!providerKey) { setError("No Apollo key. Add your Apollo API key in Settings (⚙)."); return; }
+    if (!providerKey) { setError("No Apify token. Add one in Settings (⚙) — same token as the other LinkedIn features."); return; }
     if (!companyDomain && !companyName) { setError("Enter a company domain (e.g. ibm.com) or name."); return; }
     setLoading(true); setError("");
     try {
-      const res = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-provider-key": providerKey },
-        body: JSON.stringify({
-          companyDomain: companyDomain.trim() || undefined,
-          companyName: companyName.trim() || undefined,
-          titles: FUNCTION_TITLES[fn] || [],
-          seniorities,
-          locations,
-          perPage: 100,
-          maxPages,
-        }),
+      let list = await searchCompanyEmployees({
+        companyDomain: companyDomain.trim(),
+        companyName: companyName.trim(),
+        titles: FUNCTION_TITLES[fn] || [],
+        locations,
+        maxItems,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
-
-      let list = data.people || [];
       list = await enrich(list);
       setPeople(list);
-      setMeta({ count: data.count, pagination: data.pagination });
+      setMeta({ count: list.length });
       persist(list);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
       setLoading(false);
     }
-  }, [providerKey, companyDomain, companyName, fn, seniorities, locations, maxPages, enrich, persist]);
+  }, [providerKey, companyDomain, companyName, fn, locations, maxItems, enrich, persist]);
 
   const grouped = useMemo(() => {
     const g = Object.fromEntries(TIER_ORDER.map((t) => [t, []]));
@@ -184,11 +172,11 @@ export function CompanyXRayTab() {
 
   return (
     <div>
-      <Card title="COMPANY X-RAY — ORG MAPPING (VIA APOLLO)" accent={T.cyan}>
+      <Card title="COMPANY X-RAY — ORG MAPPING (VIA APIFY)" accent={T.cyan}>
         <div style={{ marginBottom: 10, padding: "8px 12px", background: `${T.cyan}11`, border: `1px solid ${T.cyanDim}`, borderRadius: 6, color: T.text2, fontSize: 12, fontFamily: T.mono, lineHeight: 1.5 }}>
           {providerKey
-            ? "Map who works at a target company, grouped by seniority tier — filtered by function and location."
-            : "Add an Apollo API key in Settings (⚙) to enable this. Sign up at apollo.io to get one."}
+            ? "Map who works at a target company, grouped by seniority tier (via AI title clustering) — filtered by function and location. Uses the same Apify token as your other LinkedIn features."
+            : "Add an Apify token in Settings (⚙) to enable this — same token used for LinkedIn search/enrich elsewhere in Scout."}
         </div>
         <Row>
           <Field><FieldLabel>Company domain</FieldLabel><TextInput value={companyDomain} onChange={(e) => setCompanyDomain(e.target.value)} placeholder="ibm.com" /></Field>
@@ -201,20 +189,13 @@ export function CompanyXRayTab() {
               {Object.keys(FUNCTION_TITLES).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
           </Field>
-          <Field><FieldLabel>Max pages (×100 results)</FieldLabel><TextInput type="number" min={1} max={10} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value))} /></Field>
+          <Field><FieldLabel>Max results</FieldLabel><TextInput type="number" min={10} max={500} step={10} value={maxItems} onChange={(e) => setMaxItems(Number(e.target.value))} /></Field>
         </Row>
 
         <FieldLabel style={{ marginTop: 14 }}>LOCATIONS</FieldLabel>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {INDIA_CITIES.map((c) => (
             <button key={c} onClick={() => toggle(locations, setLocations, c)} style={chip(locations.includes(c) ? T.cyan : T.text3)}>{c}</button>
-          ))}
-        </div>
-
-        <FieldLabel style={{ marginTop: 12 }}>SENIORITY <span style={{ color: T.text4, textTransform: "none" }}>(none = all levels)</span></FieldLabel>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {SENIORITY_OPTIONS.map((s) => (
-            <button key={s} onClick={() => toggle(seniorities, setSeniorities, s)} style={chip(seniorities.includes(s) ? T.purple : T.text3)}>{s}</button>
           ))}
         </div>
 
@@ -236,7 +217,7 @@ export function CompanyXRayTab() {
 
       {meta && people.length > 0 && (
         <div style={{ color: T.text3, fontFamily: T.mono, fontSize: 11, letterSpacing: 1.5, marginBottom: 10 }}>
-          {people.length} SHOWN · PROVIDER TOTAL {meta.pagination?.total_entries ?? "?"}
+          {people.length} PEOPLE MAPPED
         </div>
       )}
 

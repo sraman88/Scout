@@ -2,15 +2,27 @@ import { useState } from "react";
 import { T } from "../theme.js";
 import { Card, FieldLabel, TextArea, TextInput, MicroBtn, PrimaryBtn, ErrBox, Empty, LoadingPulse, Row, Pills, Divider, CopyBtn } from "../components/ui.jsx";
 
-export function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, jdResult, jdError, analyseJD, setTab, updateCtxField, updateJdField }) {
+export function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLoading, jdResult, jdError, analyseJD, setTab, updateCtxField, updateJdField, profQuery, setProfQuery, ghLocation, setGhLocation, runKeywordSearch, profLoading }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <Card title="JD INPUT" accent={T.cyan}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
           <ModeChip active={jdMode === "paste"} onClick={() => setJdMode("paste")} label="✎ PASTE JD" />
           <ModeChip active={jdMode === "url"} onClick={() => setJdMode("url")} label="🔗 FROM URL" />
+          <ModeChip active={jdMode === "keyword"} onClick={() => setJdMode("keyword")} label="🔍 KEYWORD SEARCH (NO JD)" />
         </div>
-        {jdMode === "paste" ? (
+        {jdMode === "keyword" ? (
+          <>
+            <FieldLabel>Keywords / skills</FieldLabel>
+            <TextArea value={profQuery} onChange={(e) => setProfQuery(e.target.value)} placeholder="python, kafka, microservices..." rows={4} />
+            <FieldLabel style={{ marginTop: 10 }}>Location</FieldLabel>
+            <TextInput value={ghLocation} onChange={(e) => setGhLocation(e.target.value)} placeholder="Bangalore, India" />
+            <div style={{ marginTop: 12, padding: "10px 12px", background: `${T.cyan}0d`, border: `1px solid ${T.cyanDim}`, borderRadius: 8, color: T.text2, fontSize: 12, fontFamily: T.mono, lineHeight: 1.5 }}>
+              Skips JD parsing entirely — searches LinkedIn (live), Google (live), and GitHub directly from these keywords, no LLM call needed.
+            </div>
+            <PrimaryBtn onClick={runKeywordSearch} disabled={profLoading || !profQuery.trim()} style={{ marginTop: 14 }}>{profLoading ? "SEARCHING..." : "→ SEARCH PROFILES"}</PrimaryBtn>
+          </>
+        ) : jdMode === "paste" ? (
           <>
             <FieldLabel>Paste the JD text</FieldLabel>
             <TextArea value={jd} onChange={(e) => setJd(e.target.value)} placeholder="Paste full JD..." rows={12} />
@@ -32,8 +44,12 @@ export function JDIntelTab({ jdMode, setJdMode, jd, setJd, jdUrl, setJdUrl, jdLo
             </div>
           </>
         )}
-        <PrimaryBtn onClick={analyseJD} disabled={jdLoading} style={{ marginTop: 14 }}>{jdLoading ? "ANALYSING..." : "→ ANALYSE JD"}</PrimaryBtn>
-        {jdError && <ErrBox>{jdError}</ErrBox>}
+        {jdMode !== "keyword" && (
+          <>
+            <PrimaryBtn onClick={analyseJD} disabled={jdLoading} style={{ marginTop: 14 }}>{jdLoading ? "ANALYSING..." : "→ ANALYSE JD"}</PrimaryBtn>
+            {jdError && <ErrBox>{jdError}</ErrBox>}
+          </>
+        )}
       </Card>
 
       <Card title="STRUCTURED INTEL (click any to edit)" accent={T.purple}>
