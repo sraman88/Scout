@@ -17,6 +17,7 @@ import { Footer } from "./components/ui.jsx";
 import { JDIntelTab } from "./tabs/JDIntelTab.jsx";
 import { ProfileFinderTab } from "./tabs/ProfileFinderTab.jsx";
 import { EmailFinderTab } from "./tabs/EmailFinderTab.jsx";
+import { CompanyXRayTab } from "./tabs/CompanyXRayTab.jsx";
 import { T, COUNTRIES, ENV_GROQ, ENV_GEMINI } from "./theme.js";
 
 const JD_SCHEMA_PROMPT = `You are SCOUT, a recruiter intel assistant. Analyse the JD and return ONLY a JSON object.
@@ -372,6 +373,7 @@ export default function App() {
         {tab === "jd" && (<JDIntelTab jdMode={jdMode} setJdMode={setJdMode} jd={jd} setJd={setJd} jdUrl={jdUrl} setJdUrl={setJdUrl} jdLoading={jdLoading} jdResult={jdResult} jdError={jdError} analyseJD={analyseJD} setTab={setTab} updateCtxField={updateCtxField} updateJdField={updateJdField} />)}
         {tab === "profiles" && (<ProfileFinderTab profQuery={profQuery} setProfQuery={setProfQuery} ghLocation={ghLocation} setGhLocation={setGhLocation} ghLanguage={ghLanguage} setGhLanguage={setGhLanguage} ghMinFollowers={ghMinFollowers} setGhMinFollowers={setGhMinFollowers} ghExpYears={ghExpYears} setGhExpYears={setGhExpYears} profSrc={profSrc} profResults={profResults} profLoading={profLoading} profError={profError} profWarning={profWarning} profFetched={profFetched} findProfiles={findProfiles} pickCandidate={pickCandidate} saveCandidate={saveCandidate} saved={saved} ctx={ctx} country={countryObj} />)}
         {tab === "email" && (<EmailFinderTab emailUser={emailUser} setEmailUser={setEmailUser} emailFullName={emailFullName} setEmailFullName={setEmailFullName} emailLoading={emailLoading} emailResult={emailResult} emailError={emailError} findEmail={findEmail} picked={picked} emailLinkedInUrl={emailLinkedInUrl} setEmailLinkedInUrl={setEmailLinkedInUrl} apifyProfLoading={apifyProfLoading} apifyProfResult={apifyProfResult} apifyProfError={apifyProfError} enrichViaApify={enrichViaApify} />)}
+        {tab === "xray" && (<CompanyXRayTab />)}
 
         <Footer />
       </div>
