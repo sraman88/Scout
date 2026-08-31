@@ -1,33 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { T, ENV_GEMINI } from "../theme.js";
+import { T } from "../theme.js";
 import { getStoredKey } from "../lib/storage.js";
 import { llmCall } from "../lib/llm.js";
 import { searchCompanyEmployees } from "../lib/apifySearch.js";
 import { resolveCompetitors } from "../lib/relevanceEngine.js";
-import { geminiGrounded, perplexity, openAICompatible } from "../lib/groundedModel.js";
+import { getCompetitorModel } from "../lib/competitorModel.js";
 import { Card, FieldLabel, TextInput, Row, Field, Divider, PrimaryBtn, MicroBtn, ErrBox, Empty, LoadingPulse, Badge, Pill } from "../components/ui.jsx";
 import { chip } from "../components/styleHelpers.js";
-
-/* Builds a callModel(prompt)=>string function from whatever's configured in
-   Settings for competitor lookup (defaults to Gemini + Google Search
-   grounding, reusing the existing Gemini key — zero new keys needed). */
-function getCompetitorModel() {
-  const provider = getStoredKey("competitor_provider") || "gemini";
-  if (provider === "gemini") {
-    const key = getStoredKey("gemini") || ENV_GEMINI;
-    return key ? geminiGrounded(key) : null;
-  }
-  if (provider === "perplexity") {
-    const key = getStoredKey("competitor_api_key");
-    return key ? perplexity(key) : null;
-  }
-  if (provider === "custom") {
-    const key = getStoredKey("competitor_api_key");
-    const baseURL = getStoredKey("competitor_base_url");
-    return key && baseURL ? openAICompatible(key, { baseURL, model: getStoredKey("competitor_model") || "gpt-4o-mini" }) : null;
-  }
-  return null;
-}
 
 /* Maps a target company's org for one function + geography via
    harvestapi~linkedin-company-employees on Apify — same token as the other

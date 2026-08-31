@@ -6,6 +6,7 @@ export function Tabs({ tab, setTab, ctx, picked }) {
     { k: "profiles", label: "PROFILES", badge: ctx.must_have.length ? "●" : "" },
     { k: "email", label: "EMAIL + SOCIAL", badge: picked ? "●" : "" },
     { k: "xray", label: "COMPANY X-RAY", badge: "" },
+    { k: "smart", label: "SMART INTAKE", badge: "" },
   ];
   return (
     <div style={{ display: "flex", gap: 4, padding: 6, background: T.panel, border: `1px solid ${T.cyanDim}`, borderRadius: 12, backdropFilter: "blur(8px)", marginBottom: 14, flexWrap: "wrap" }}>

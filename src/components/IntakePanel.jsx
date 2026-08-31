@@ -1,10 +1,13 @@
-import React, { useState, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { T } from "../theme.js";
 import { senseFamily, buildSpec, buildQuery, gateSources, resolveCompetitors, FAMILIES } from "../lib/relevanceEngine.js";
+import { Card, FieldLabel, TextInput, PrimaryBtn, MicroBtn, Pill } from "./ui.jsx";
+import { chip } from "./styleHelpers.js";
 
 // IntakePanel — the real intake, importing the engine instead of duplicating it.
-// Emits the canonical spec so the profiles tab can run buildQuery -> fetch ->
+// Emits the canonical spec so a results tab can run buildQuery -> fetch ->
 // prefilter -> scoreBatch off it.
-//   <IntakePanel callModel={geminiGrounded(settings.geminiKey)} onSpec={setSpec} />
+//   <IntakePanel callModel={getCompetitorModel()} onSpec={setSpec} onQuery={setQuery} />
 //
 // Question ids below ARE the contract with engine buildSpec(): it reads
 // answers.stack / vertical / domain / signals / level. Keep them aligned.
@@ -71,108 +74,79 @@ export default function IntakePanel({ callModel, onSpec, onQuery }) {
   const sources = useMemo(() => (spec ? gateSources(spec) : []), [spec]);
 
   // Push spec/query up whenever they change.
-  React.useEffect(() => { if (spec) onSpec?.(spec); }, [spec, onSpec]);
-  React.useEffect(() => { if (query) onQuery?.(query); }, [query, onQuery]);
+  useEffect(() => { if (spec) onSpec?.(spec); }, [spec, onSpec]);
+  useEffect(() => { if (query) onQuery?.(query); }, [query, onQuery]);
 
   if (!family) {
     return (
-      <div style={S.wrap}>
-        <div style={S.bar}>
-          <input style={S.input} value={raw} onChange={(e) => setRaw(e.target.value)}
+      <Card title="SMART INTAKE" accent={T.cyan}>
+        <FieldLabel>Describe who you're hiring</FieldLabel>
+        <div style={{ display: "flex", gap: 8 }}>
+          <TextInput value={raw} onChange={(e) => setRaw(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && start()}
             placeholder={'e.g. ("account executive" OR "sales manager") AND SaaS AND (Mumbai OR Pune)'} />
-          <button style={S.go} onClick={start}>Sense</button>
+          <PrimaryBtn onClick={start} style={{ width: "auto", padding: "10px 20px" }}>SENSE</PrimaryBtn>
         </div>
-        <div style={S.empty}>Enter a search to begin.</div>
-      </div>
+        <div style={{ marginTop: 10, color: T.text3, fontFamily: T.mono, fontSize: 12, fontStyle: "italic" }}>Enter a search to begin.</div>
+      </Card>
     );
   }
 
   return (
-    <div style={S.wrap}>
-      <div style={S.bar}>
-        <input style={S.input} value={raw} onChange={(e) => setRaw(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && start()} />
-        <button style={S.go} onClick={start}>Re-sense</button>
+    <Card title="SMART INTAKE" accent={T.cyan}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <TextInput value={raw} onChange={(e) => setRaw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && start()} />
+        <PrimaryBtn onClick={start} style={{ width: "auto", padding: "10px 20px" }}>RE-SENSE</PrimaryBtn>
       </div>
 
-      <div style={S.detected}>
-        <span style={S.dot} />Sensed <b>&nbsp;{FAMILIES[family].label}</b>.
-        <select style={S.switch} value={family} onChange={(e) => { setFamily(e.target.value); setAnswers({}); }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 8, background: `${T.green}11`, border: `1px solid ${T.green}44`, marginTop: 12, marginBottom: 16, fontFamily: T.mono, fontSize: 12 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: T.green, boxShadow: `0 0 8px ${T.green}` }} />
+        <span style={{ color: T.text2 }}>Sensed <b style={{ color: T.text }}>{FAMILIES[family].label}</b></span>
+        <select value={family} onChange={(e) => { setFamily(e.target.value); setAnswers({}); }} style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 11, background: T.fieldBg, color: T.fieldText, border: `1px solid ${T.cyanDim}`, borderRadius: 6, padding: "4px 8px" }}>
           {Object.entries(FAMILIES).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
         </select>
       </div>
 
-      <div style={S.companyRow}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 8 }}>
         <div style={{ flex: 1 }}>
-          <div style={S.qlab}>Hiring for <span style={S.hint}>unlocks competitor sourcing</span></div>
-          <input style={S.cinput} value={company} placeholder="e.g. Salesforce"
-            onChange={(e) => setCompany(e.target.value)} onBlur={findCompetitors} />
+          <FieldLabel>HIRING FOR <span style={{ color: T.text4, textTransform: "none" }}>(unlocks competitor sourcing)</span></FieldLabel>
+          <TextInput value={company} placeholder="e.g. Salesforce" onChange={(e) => setCompany(e.target.value)} onBlur={findCompetitors} />
         </div>
-        <button style={S.findBtn} onClick={findCompetitors} disabled={resolving || !company.trim()}>
-          {resolving ? "…" : "↻ competitors"}
-        </button>
+        <MicroBtn onClick={findCompetitors} color={T.amber} disabled={resolving || !company.trim()}>{resolving ? "…" : "↻ COMPETITORS"}</MicroBtn>
       </div>
       {competitors.length > 0 && (
-        <div style={S.compRow}>{competitors.map((c) => <span key={c} style={S.comp}>{c}</span>)}</div>
+        <div style={{ marginBottom: 16 }}>
+          {competitors.map((c) => <Pill key={c} color={T.amber}>{c}</Pill>)}
+        </div>
       )}
 
       {(QUESTIONS[family] || []).map((q) => {
         const cur = answers[q.id];
         return (
-          <div key={q.id} style={S.q}>
-            <div style={S.qlab}>{q.label} <span style={S.pick}>{q.type === "multi" ? "select any" : "pick one"}</span>{q.req && <span style={S.req}>recommended</span>}</div>
-            <div style={S.chips}>
+          <div key={q.id} style={{ marginBottom: 16 }}>
+            <FieldLabel>{q.label} <span style={{ color: T.text4, textTransform: "none" }}>{q.type === "multi" ? "select any" : "pick one"}</span>{q.req && <span style={{ color: T.amber, textTransform: "none" }}> · recommended</span>}</FieldLabel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {q.opts.map((o) => {
                 const on = q.type === "multi" ? (cur || []).includes(o) : cur === o;
-                return <button key={o} onClick={() => toggle(q)(o)} style={{ ...S.chip, ...(on ? S.chipOn : {}) }}>{o}</button>;
+                return <button key={o} onClick={() => toggle(q)(o)} style={chip(on ? T.cyan : T.text3)}>{o}</button>;
               })}
             </div>
           </div>
         );
       })}
 
-      <div style={S.out}>
-        <div style={S.oh}>Refined search</div>
-        <div style={S.boolean}>{query?.boolean}</div>
+      <div style={{ marginTop: 18 }}>
+        <FieldLabel>REFINED SEARCH</FieldLabel>
+        <div style={{ fontFamily: T.mono, fontSize: 12, lineHeight: 1.6, background: T.bg3, border: `1px solid ${T.cyanDim}`, borderRadius: 8, padding: "12px 14px", wordBreak: "break-word", color: T.text2 }}>{query?.boolean}</div>
       </div>
-      <div style={S.out}>
-        <div style={S.oh}>Where to look</div>
+      <div style={{ marginTop: 18 }}>
+        <FieldLabel>WHERE TO LOOK</FieldLabel>
         {sources.map((s) => (
-          <div key={s.id} style={S.chan}>
-            <b>{s.label}</b><span style={S.why}>{s.why}</span>
+          <div key={s.id} style={{ border: `1px solid ${T.cyanDim}`, borderRadius: 8, padding: "10px 12px", marginBottom: 8, fontSize: 13 }}>
+            <b style={{ color: T.text }}>{s.label}</b><span style={{ color: T.text3, marginLeft: 8 }}>{s.why}</span>
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
-
-const S = {
-  wrap: { fontFamily: "'IBM Plex Sans', system-ui, sans-serif", color: "#000", maxWidth: 560 },
-  bar: { display: "flex", gap: 8, marginBottom: 14 },
-  input: { flex: 1, fontSize: 14, padding: "11px 13px", border: "1px solid #E4E2DA", borderRadius: 10 },
-  go: { fontWeight: 600, padding: "0 18px", border: "none", borderRadius: 10, background: "#000", color: "#fff", cursor: "pointer" },
-  empty: { fontSize: 13, color: "#8A867C", fontStyle: "italic" },
-  detected: { display: "flex", alignItems: "center", gap: 6, padding: "9px 12px", borderRadius: 8, background: "#EAF4EF", fontSize: 13.5, marginBottom: 16 },
-  dot: { width: 8, height: 8, borderRadius: "50%", background: "#0B6E4F" },
-  switch: { marginLeft: "auto", fontSize: 12, border: "1px solid #E4E2DA", borderRadius: 6, padding: "3px 6px" },
-  companyRow: { display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 8 },
-  qlab: { fontSize: 13, fontWeight: 600, marginBottom: 8 },
-  hint: { fontWeight: 400, fontSize: 11, color: "#8A867C", marginLeft: 6 },
-  pick: { fontWeight: 500, fontSize: 11, color: "#8A867C", marginLeft: 6 },
-  req: { color: "#9A6B00", fontWeight: 500, fontSize: 11.5, marginLeft: 6 },
-  cinput: { width: "100%", fontSize: 14, padding: "9px 11px", border: "1px solid #E4E2DA", borderRadius: 8 },
-  findBtn: { fontSize: 12.5, fontWeight: 600, padding: "9px 12px", border: "1px solid #E4E2DA", borderRadius: 8, background: "#fff", cursor: "pointer", whiteSpace: "nowrap" },
-  compRow: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 },
-  comp: { fontSize: 11.5, padding: "2px 9px", borderRadius: 999, background: "#EAF4EF", color: "#0B6E4F", fontWeight: 500 },
-  q: { marginBottom: 16 },
-  chips: { display: "flex", flexWrap: "wrap", gap: 7 },
-  chip: { fontFamily: "inherit", fontSize: 12.5, padding: "6px 12px", border: "1px solid #E4E2DA", borderRadius: 999, background: "#fff", cursor: "pointer", color: "#000" },
-  chipOn: { background: "#000", color: "#fff", borderColor: "#000" },
-  out: { marginTop: 18 },
-  oh: { fontSize: 12, fontWeight: 700, color: "#8A867C", marginBottom: 8 },
-  boolean: { fontSize: 13, lineHeight: 1.6, background: "#F6F5F0", border: "1px solid #E4E2DA", borderRadius: 8, padding: "12px 14px", wordBreak: "break-word" },
-  chan: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "10px 12px", marginBottom: 8, fontSize: 13 },
-  why: { color: "#55524B", marginLeft: 8 },
-};
