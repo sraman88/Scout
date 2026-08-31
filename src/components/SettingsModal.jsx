@@ -2,6 +2,7 @@ import { useState } from "react";
 import { T } from "../theme.js";
 import { getStoredKey, setStoredKey } from "../lib/storage.js";
 import { FieldLabel, TextInput } from "./ui.jsx";
+import CompetitorKeyField from "./CompetitorKeyField.jsx";
 
 export function SettingsModal({ close, provider, setProvider }) {
   const [groq, setGroq] = useState(getStoredKey("groq"));
@@ -12,6 +13,11 @@ export function SettingsModal({ close, provider, setProvider }) {
   const [apifySearchActor, setApifySearchActor] = useState(getStoredKey("apify_search_actor") || "harvestapi~linkedin-profile-search");
   const [apifyGoogleActor, setApifyGoogleActor] = useState(getStoredKey("apify_google_actor") || "apify~google-search-scraper");
   const [apifyCompanyActor, setApifyCompanyActor] = useState(getStoredKey("apify_company_actor") || "harvestapi~linkedin-company-employees");
+  const [competitorModel, setCompetitorModel] = useState({
+    provider: getStoredKey("competitor_provider") || "gemini",
+    apiKey: getStoredKey("competitor_api_key"),
+    baseURL: getStoredKey("competitor_base_url"),
+  });
 
   function save() {
     setStoredKey("groq", groq.trim());
@@ -22,10 +28,13 @@ export function SettingsModal({ close, provider, setProvider }) {
     setStoredKey("apify_search_actor", apifySearchActor.trim());
     setStoredKey("apify_google_actor", apifyGoogleActor.trim());
     setStoredKey("apify_company_actor", apifyCompanyActor.trim());
+    setStoredKey("competitor_provider", competitorModel.provider || "gemini");
+    setStoredKey("competitor_api_key", (competitorModel.apiKey || "").trim());
+    setStoredKey("competitor_base_url", (competitorModel.baseURL || "").trim());
     setStoredKey("onboarding_done", "1");
     close();
   }
-  function clearAll() { ["groq", "gemini", "github", "apify", "apify_profile_actor", "apify_search_actor", "apify_google_actor", "apify_company_actor", "onboarding_done"].forEach((k) => setStoredKey(k, "")); setGroq(""); setGemini(""); setGh(""); setApify(""); }
+  function clearAll() { ["groq", "gemini", "github", "apify", "apify_profile_actor", "apify_search_actor", "apify_google_actor", "apify_company_actor", "competitor_provider", "competitor_api_key", "competitor_base_url", "onboarding_done"].forEach((k) => setStoredKey(k, "")); setGroq(""); setGemini(""); setGh(""); setApify(""); setCompetitorModel({ provider: "gemini", apiKey: "", baseURL: "" }); }
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, backdropFilter: "blur(4px)" }} onClick={close}>
@@ -78,6 +87,9 @@ export function SettingsModal({ close, provider, setProvider }) {
         <p style={{ color: T.text3, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
           Powers the Company X-Ray tab (maps who works at a target company). Costs $0.004-0.012 per person depending on mode — same Apify token above, no separate account needed.
         </p>
+        <div style={{ marginTop: 12 }}>
+          <CompetitorKeyField value={competitorModel} onChange={setCompetitorModel} />
+        </div>
         <FieldLabel style={{ marginTop: 16 }}>PREFERRED LLM PROVIDER</FieldLabel>
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={() => setProvider("groq")} style={{ flex: 1, padding: "10px 14px", background: provider === "groq" ? T.cyan : "transparent", color: provider === "groq" ? T.bg : T.text2, border: `1px solid ${provider === "groq" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GROQ (Llama 3.3)</button>

@@ -1,10 +1,33 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { T } from "../theme.js";
+import { T, ENV_GEMINI } from "../theme.js";
 import { getStoredKey } from "../lib/storage.js";
 import { llmCall } from "../lib/llm.js";
 import { searchCompanyEmployees } from "../lib/apifySearch.js";
-import { Card, FieldLabel, TextInput, Row, Field, Divider, PrimaryBtn, MicroBtn, ErrBox, Empty, LoadingPulse, Badge } from "../components/ui.jsx";
+import { resolveCompetitors } from "../lib/relevanceEngine.js";
+import { geminiGrounded, perplexity, openAICompatible } from "../lib/groundedModel.js";
+import { Card, FieldLabel, TextInput, Row, Field, Divider, PrimaryBtn, MicroBtn, ErrBox, Empty, LoadingPulse, Badge, Pill } from "../components/ui.jsx";
 import { chip } from "../components/styleHelpers.js";
+
+/* Builds a callModel(prompt)=>string function from whatever's configured in
+   Settings for competitor lookup (defaults to Gemini + Google Search
+   grounding, reusing the existing Gemini key — zero new keys needed). */
+function getCompetitorModel() {
+  const provider = getStoredKey("competitor_provider") || "gemini";
+  if (provider === "gemini") {
+    const key = getStoredKey("gemini") || ENV_GEMINI;
+    return key ? geminiGrounded(key) : null;
+  }
+  if (provider === "perplexity") {
+    const key = getStoredKey("competitor_api_key");
+    return key ? perplexity(key) : null;
+  }
+  if (provider === "custom") {
+    const key = getStoredKey("competitor_api_key");
+    const baseURL = getStoredKey("competitor_base_url");
+    return key && baseURL ? openAICompatible(key, { baseURL, model: getStoredKey("competitor_model") || "gpt-4o-mini" }) : null;
+  }
+  return null;
+}
 
 /* Maps a target company's org for one function + geography via
    harvestapi~linkedin-company-employees on Apify — same token as the other
@@ -58,6 +81,11 @@ export function CompanyXRayTab() {
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState("");
   const [cachedAt, setCachedAt] = useState(null);
+
+  const [competitors, setCompetitors] = useState([]);
+  const [compLoading, setCompLoading] = useState(false);
+  const [compError, setCompError] = useState("");
+  const [compSource, setCompSource] = useState("");
 
   const cacheKey = useMemo(
     () => `${CACHE_PREFIX}${(companyDomain || companyName || "").toLowerCase()}_${fn}`,
@@ -150,6 +178,29 @@ export function CompanyXRayTab() {
     }
   }, [providerKey, companyDomain, companyName, fn, locations, maxItems, enrich, persist]);
 
+  const findCompetitors = useCallback(async () => {
+    const company = (companyName || companyDomain).trim();
+    if (!company) { setCompError("Enter a company name or domain first."); return; }
+    const callModel = getCompetitorModel();
+    if (!callModel) { setCompError("No competitor-lookup model configured. Add one in Settings (⚙) — defaults to your existing Gemini key, zero new keys needed."); return; }
+    setCompLoading(true); setCompError(""); setCompetitors([]);
+    try {
+      const { competitors: list, source } = await resolveCompetitors(company, { callModel, region: "India" });
+      setCompetitors(list);
+      setCompSource(source);
+      if (source === "error" || source === "empty_result") setCompError("Couldn't resolve real competitors — model call failed or returned nothing usable.");
+    } catch (e) {
+      setCompError(e.message || String(e));
+    } finally {
+      setCompLoading(false);
+    }
+  }, [companyName, companyDomain]);
+
+  function mapCompetitor(name) {
+    setCompanyName(name);
+    setCompanyDomain("");
+  }
+
   const grouped = useMemo(() => {
     const g = Object.fromEntries(TIER_ORDER.map((t) => [t, []]));
     for (const p of people) {
@@ -210,6 +261,26 @@ export function CompanyXRayTab() {
         </div>
         {cachedAt && <div style={{ marginTop: 8, color: T.text3, fontFamily: T.mono, fontSize: 10 }}>cached {new Date(cachedAt).toLocaleDateString()}</div>}
         {error && <ErrBox>{error}</ErrBox>}
+      </Card>
+
+      <Card title="COMPETITORS (WEB-GROUNDED)" accent={T.amber}>
+        <div style={{ marginBottom: 10, color: T.text2, fontSize: 12, fontFamily: T.mono, lineHeight: 1.5 }}>
+          Resolves the target's real, currently-operating competitors via a web-grounded model (not a hardcoded list, so it stays accurate) — click one to map it instead, for poaching-adjacent sourcing.
+        </div>
+        <MicroBtn onClick={findCompetitors} color={T.amber} disabled={compLoading || (!companyName.trim() && !companyDomain.trim())}>
+          {compLoading ? "RESOLVING..." : "→ FIND COMPETITORS"}
+        </MicroBtn>
+        {compError && <ErrBox>{compError}</ErrBox>}
+        {competitors.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            {competitors.map((c) => (
+              <button key={c} onClick={() => mapCompetitor(c)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }} title="Map this company instead">
+                <Pill color={T.amber}>{c}</Pill>
+              </button>
+            ))}
+            {compSource === "cache" && <div style={{ marginTop: 6, color: T.text4, fontFamily: T.mono, fontSize: 10 }}>from cache</div>}
+          </div>
+        )}
       </Card>
 
       {loading && <Card><LoadingPulse /></Card>}
