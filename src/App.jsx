@@ -22,6 +22,8 @@ export default function App() {
         <div className="brand">S<span>C</span>OUT</div>
         <div className="topright">
           <span className="tag">Sourcing intelligence · one screen</span>
+          {/* Which build is actually live — checkable without opening devtools. */}
+          <span className="build" title={`Build ${__BUILD_ID__} · ${__BUILD_TIME__} UTC`}>{__BUILD_ID__}</span>
           <button className="iconbtn" onClick={() => setShowSettings(true)} title="API keys & settings">⚙ Settings</button>
         </div>
       </div>

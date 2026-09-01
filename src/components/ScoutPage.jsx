@@ -253,6 +253,20 @@ export default function ScoutPage() {
         warnings.push(`${label}: ${msg}`);
         stats.push({ label, count: 0, error: msg });
       })));
+    /* Apify can be configured but still yield nothing — out of credit, a bad
+       actor id, a failing run. Rather than report "no candidates from any
+       source" when a free source exists, fall back to the keyless X-ray. */
+    if (!harvested.length && wantsLinkedIn && hasApify) {
+      try {
+        const rescued = await searchLinkedInXray({ titles: s.titles || [], location: loc, extra: s.skills?.slice(0, 1) || [] });
+        if (rescued.length) {
+          capture(rescued);
+          stats.push({ label: "LinkedIn X-ray (fallback)", count: rescued.length });
+          warnings.push("Apify returned nothing — fell back to the keyless LinkedIn X-ray.");
+        }
+      } catch { /* fallback is best-effort; the original errors still surface */ }
+    }
+
     setSourceStats(stats.sort((a, b) => b.count - a.count));
     setSearching(false);
     if (warnings.length) setWarning(warnings.join(" · "));

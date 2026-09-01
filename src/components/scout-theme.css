@@ -21,6 +21,7 @@
   .brand span{color:var(--accent)}
   .top .tag{font-size:13px;color:var(--ink-soft)}
   .topright{display:flex;align-items:center;gap:14px}
+  .build{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--ink-faint);background:#EEF2F8;border-radius:6px;padding:3px 7px;cursor:default}
   .iconbtn{font-family:inherit;font-size:13px;font-weight:600;color:var(--ink-soft);background:#fff;border:1px solid var(--rule);border-radius:9px;padding:7px 13px;cursor:pointer}
   .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
   @media(max-width:560px){.top .tag{display:none}}
