@@ -7,7 +7,16 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
-    files: ['**/*.{js,jsx}'],
+    // Config and test files run in Node, not the browser: `process`,
+    // `globalThis` and friends are legitimate there. Without this, `npm run
+    // lint` (which lints the whole repo, unlike `eslint src/`) fails on
+    // vite.config.js and blocks CI before anything is built.
+    files: ['*.config.js', 'test/**/*.mjs'],
+    extends: [js.configs.recommended],
+    languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['src/**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,
       reactHooks.configs.flat.recommended,

@@ -89,7 +89,7 @@ results.push(await run("falls back to preferred names when listing fails",
 results.push(await run("falls back to plain text when json mode is unsupported",
   (() => {
     let jsonTried = false;
-    return (u, model) => {
+    return (u) => {
       if (u.endsWith("/models")) return modelList(["llama-3.3-70b-versatile"]);
       if (!jsonTried) { jsonTried = true; return res(400, '{"error":{"message":"response_format json_object is not supported"}}'); }
       return chatOk('{"ok":true}');
