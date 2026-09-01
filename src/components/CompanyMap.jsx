@@ -90,7 +90,7 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
 
   const fam = FAMILIES[family] || FAMILIES.sales;
   const hasApify = !!getStoredKey("apify");
-  const provider = getStoredKey("provider_pref") || "groq";
+  const provider = getStoredKey("provider_pref") || "auto";
 
   /* Seed from the JD when it changes, without clobbering anything already
      typed. Adjusting state during render (rather than in an effect) is the

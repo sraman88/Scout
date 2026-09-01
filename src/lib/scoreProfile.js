@@ -10,7 +10,7 @@ import { mapPool } from "./http.js";
    skills/must-haves/competitors. Returns exactly the shape CandidateCard.jsx
    already expects as `profile.match`. */
 export async function scoreProfile(profile, spec, { provider } = {}) {
-  const prov = provider || getStoredKey("provider_pref") || "groq";
+  const prov = provider || getStoredKey("provider_pref") || "auto";
   const prompt = `SPEC:
 Role family: ${spec.family}
 Titles wanted: ${(spec.titles || []).slice(0, 12).join(", ") || "none specified"}

@@ -103,6 +103,7 @@ export default function ScoutPage() {
   const [warning, setWarning] = useState("");
   const [saved, setSaved] = useState([]);
   const [sourcesUsed, setSourcesUsed] = useState([]);
+  const [sourceStats, setSourceStats] = useState([]);
   const [sensing, setSensing] = useState(false);
   const [derived, setDerived] = useState(null);
   const [leads, setLeads] = useState([]);
@@ -126,7 +127,7 @@ export default function ScoutPage() {
 
     setSensing(true);
     try {
-      const { family: f, derived, source } = await deriveRole(text, { provider: getStoredKey("provider_pref") || "groq" });
+      const { family: f, derived, source } = await deriveRole(text, { provider: getStoredKey("provider_pref") || "auto" });
       setFamily(f);
       setDerived(derived);
       if (source === "keywords" && !quick.family) {
@@ -168,7 +169,7 @@ export default function ScoutPage() {
       scrollTo(intakeRef);
       setSensing(true);
       try {
-        const { family: f, derived: d } = await deriveRole(jd, { provider: getStoredKey("provider_pref") || "groq" });
+        const { family: f, derived: d } = await deriveRole(jd, { provider: getStoredKey("provider_pref") || "auto" });
         setFamily(f); setDerived(d);
       } finally {
         setSensing(false);
@@ -204,7 +205,7 @@ export default function ScoutPage() {
     const loc = s.locations?.[0] || "India";
     const primarySkill = s.skills?.[0] || "";
 
-    setSearching(true); setError(""); setWarning(""); setResults([]); setCount(0); setLeads([]);
+    setSearching(true); setError(""); setWarning(""); setResults([]); setCount(0); setLeads([]); setSourceStats([]);
     scrollTo(resultsRef);
 
     const warnings = [];
@@ -241,14 +242,25 @@ export default function ScoutPage() {
       ? searchHackerNewsLeads({ query: leadQuery(s), mustHave: s.skills || [] }).catch(() => [])
       : Promise.resolve([]);
 
-    await Promise.all(tasks.map(({ label, p }) => p.then(capture).catch((e) => warnings.push(`${label}: ${e.message || e}`))));
+    /* Per-source counts, so "why am I only seeing GitHub?" is answerable from
+       the screen instead of guesswork — each source reports what it returned,
+       or why it returned nothing. */
+    const stats = [];
+    await Promise.all(tasks.map(({ label, p }) => p
+      .then((items) => { capture(items); stats.push({ label, count: items?.length || 0 }); })
+      .catch((e) => {
+        const msg = e.message || String(e);
+        warnings.push(`${label}: ${msg}`);
+        stats.push({ label, count: 0, error: msg });
+      })));
+    setSourceStats(stats.sort((a, b) => b.count - a.count));
     setSearching(false);
     if (warnings.length) setWarning(warnings.join(" · "));
 
     leadsPromise.then(async (raw) => {
       if (!raw.length) return;
       setLeads(raw);
-      setLeads(await summarizeLeads(raw, { provider: getStoredKey("provider_pref") || "groq" }));
+      setLeads(await summarizeLeads(raw, { provider: getStoredKey("provider_pref") || "auto" }));
     });
 
     if (!harvested.length) {
@@ -358,6 +370,17 @@ export default function ScoutPage() {
             {sourcesUsed.length
               ? "Nothing relevant survived filtering — see the note above."
               : "Run the search from smart intake — scored profiles appear here."}
+          </div>
+        )}
+
+        {sourceStats.length > 0 && !busy && (
+          <div className="srcstats">
+            {sourceStats.map((s) => (
+              <span key={s.label} className={"sstat" + (s.count ? " ok" : s.error ? " bad" : "")} title={s.error || ""}>
+                {s.label} <b>{s.count}</b>
+                {!s.count && s.error ? <em>{s.error.slice(0, 60)}</em> : null}
+              </span>
+            ))}
           </div>
         )}
 

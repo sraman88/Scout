@@ -13,7 +13,7 @@ export default function App() {
     const hasAnyKey = getStoredKey("groq") || getStoredKey("gemini") || ENV_GROQ || ENV_GEMINI;
     return !hasAnyKey && !getStoredKey("onboarding_done");
   });
-  const [provider, setProvider] = useState(() => getStoredKey("provider_pref") || "groq");
+  const [provider, setProvider] = useState(() => getStoredKey("provider_pref") || "auto");
   function changeProvider(p) { setProvider(p); setStoredKey("provider_pref", p); }
 
   return (

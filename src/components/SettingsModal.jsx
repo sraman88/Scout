@@ -90,12 +90,15 @@ export function SettingsModal({ close, provider, setProvider }) {
         <div style={{ marginTop: 12 }}>
           <CompetitorKeyField value={competitorModel} onChange={setCompetitorModel} />
         </div>
-        <FieldLabel style={{ marginTop: 16 }}>PREFERRED LLM PROVIDER</FieldLabel>
+        <FieldLabel style={{ marginTop: 16 }}>LLM PROVIDER</FieldLabel>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setProvider("groq")} style={{ flex: 1, padding: "10px 14px", background: provider === "groq" ? T.cyan : "transparent", color: provider === "groq" ? T.bg : T.text2, border: `1px solid ${provider === "groq" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GROQ</button>
-          <button onClick={() => setProvider("gemini")} style={{ flex: 1, padding: "10px 14px", background: provider === "gemini" ? T.cyan : "transparent", color: provider === "gemini" ? T.bg : T.text2, border: `1px solid ${provider === "gemini" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GEMINI</button>
+          {[["auto", "AUTO"], ["groq", "GROQ"], ["gemini", "GEMINI"]].map(([id, label]) => (
+            <button key={id} onClick={() => setProvider(id)} style={{ flex: 1, padding: "10px 14px", background: provider === id ? T.cyan : "transparent", color: provider === id ? T.bg : T.text2, border: `1px solid ${provider === id ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>{label}</button>
+          ))}
         </div>
-        <p style={{ color: T.text3, fontSize: 11, marginTop: 8 }}>If preferred provider fails, app auto-falls back to the other.</p>
+        <p style={{ color: T.text3, fontSize: 11, marginTop: 8 }}>
+          AUTO (recommended) uses whichever provider is working and sticks with it. Model names are never hardcoded — Scout asks each provider which models your key can actually use, and skips any it rejects.
+        </p>
         <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
           <button onClick={save} style={{ flex: 1, padding: "12px 18px", background: `linear-gradient(90deg, ${T.cyan}, ${T.purple})`, color: T.bg, border: "none", borderRadius: 8, fontFamily: T.mono, fontSize: 12, fontWeight: 800, letterSpacing: 2 }}>SAVE</button>
           <button onClick={clearAll} style={{ padding: "12px 18px", background: "transparent", color: T.red, border: `1px solid ${T.red}66`, borderRadius: 8, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>CLEAR ALL</button>

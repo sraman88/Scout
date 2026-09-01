@@ -26,21 +26,49 @@ export function safeParseJSON(text) {
 
 const _model = { groq: null, gemini: null };
 
+/* Models this key was offered but cannot actually call.
+
+   Groq's /v1/models advertises `llama-3.3-70b-versatile` to keys that get a
+   403/404 when they try to use it. The first version of this fix re-resolved
+   against that same list, picked the same model, saw it was unchanged and gave
+   up — so the identical error came back. A model that fails is now blocked for
+   the session and resolution moves down the list. */
+const _bad = { groq: new Set(), gemini: new Set() };
+
 /* Exported for tests, and so a caller can force re-resolution. */
 export function resetModelCache(provider) {
-  if (provider) _model[provider] = null;
-  else { _model.groq = null; _model.gemini = null; }
+  const clear = (p) => {
+    _model[p] = null;
+    _bad[p].clear();
+    if (p === "groq") _groqListed = null; else _geminiListed = null;
+  };
+  if (provider) clear(provider);
+  else { clear("groq"); clear("gemini"); _lastGood = null; }
 }
 
 const isModelMissing = (status, body) =>
-  status === 404 || /model_not_found|does not exist|not found for api version/i.test(String(body));
+  status === 404 || status === 403 ||
+  /model_not_found|does not exist|not found for api version|do not have access|decommissioned|deprecated/i.test(String(body));
 
-function pickModel(available, { preferred, exclude, prefer }) {
-  const usable = available.filter((m) => !exclude.test(m));
-  return preferred.find((m) => usable.includes(m))
-    || usable.find((m) => prefer.test(m))
-    || usable[0]
-    || null;
+const isJsonModeUnsupported = (body) =>
+  /response_format|json_object|json_schema|responsemimetype/i.test(String(body));
+
+/* Candidate order, minus the unusable classes and anything already proven bad.
+
+   When the key's model listing came back, trust it: only preferred names that
+   are actually offered, then the rest of the listing. When listing failed
+   (bad key, endpoint down) fall back to the preferred names blind, so we can
+   still walk down to something that works. */
+function candidates(provider, available, { preferred, exclude, prefer }) {
+  const pool = available.length
+    ? [...preferred.filter((m) => available.includes(m)), ...available.filter((m) => prefer.test(m)), ...available]
+    : [...preferred];
+  const seen = new Set();
+  return pool.filter((m) => {
+    if (!m || seen.has(m) || exclude.test(m) || _bad[provider].has(m)) return false;
+    seen.add(m);
+    return true;
+  });
 }
 
 // --- Groq (OpenAI-compatible) ------------------------------------------------
@@ -62,56 +90,64 @@ async function listGroqModels(key) {
   } catch { return []; }
 }
 
-async function resolveGroqModel(key) {
-  if (_model.groq) return _model.groq;
-  const pinned = getStoredKey("groq_model");
-  if (pinned) { _model.groq = pinned.trim(); return _model.groq; }
+const GROQ_OPTS = { preferred: GROQ_PREFERRED, exclude: GROQ_EXCLUDE, prefer: /instruct|versatile|instant/i };
 
-  const available = await listGroqModels(key);
-  _model.groq = pickModel(available, { preferred: GROQ_PREFERRED, exclude: GROQ_EXCLUDE, prefer: /instruct|versatile|instant/i })
-    || GROQ_PREFERRED[0];
-  return _model.groq;
+let _groqListed = null;
+async function groqCandidates(key) {
+  const pinned = getStoredKey("groq_model");
+  if (pinned && !_bad.groq.has(pinned.trim())) return [pinned.trim()];
+  if (!_groqListed) _groqListed = await listGroqModels(key);
+  return candidates("groq", _groqListed, GROQ_OPTS);
 }
 
 export async function callGroq(messages, opts = {}) {
   const key = getStoredKey("groq") || ENV_GROQ;
   if (!key) throw new Error("Groq key missing — open Settings (⚙) to enter it");
 
-  const send = (model) => fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
+  const send = (model, json) => fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
     timeoutMs: 30000,
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model, messages,
       temperature: opts.temperature ?? 0.3,
-      ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+      ...(json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
 
-  let model = await resolveGroqModel(key);
-  let res = await send(model);
+  const pool = await groqCandidates(key);
+  if (!pool.length) throw new Error("Groq: no usable model for this key — check the key, or pin one via the groq_model setting");
 
-  if (!res.ok) {
-    const body = await res.text();
-    if (isModelMissing(res.status, body)) {
-      resetModelCache("groq");
-      const available = await listGroqModels(key);
-      const next = pickModel(available, { preferred: GROQ_PREFERRED, exclude: GROQ_EXCLUDE, prefer: /instruct|versatile|instant/i });
-      if (next && next !== model) {
-        _model.groq = next;
-        model = next;
-        res = await send(model);
+  let lastErr = "";
+  // Cached winner first, then walk the list; each failure is remembered.
+  const order = _model.groq && !_bad.groq.has(_model.groq) ? [_model.groq, ...pool.filter((m) => m !== _model.groq)] : pool;
+
+  for (const model of order.slice(0, 4)) {
+    let res = await send(model, opts.json);
+
+    if (!res.ok) {
+      const body = await res.text();
+      // Model exists but won't do JSON mode — retry it as plain text; the
+      // parser already tolerates prose-wrapped JSON.
+      if (opts.json && isJsonModeUnsupported(body)) {
+        res = await send(model, false);
+        if (!res.ok) { lastErr = `${res.status} (${model}): ${(await res.text()).slice(0, 140)}`; _bad.groq.add(model); continue; }
+      } else if (isModelMissing(res.status, body)) {
+        _bad.groq.add(model);
+        lastErr = `${res.status} (${model}): ${body.slice(0, 140)}`;
+        continue; // try the next candidate
+      } else {
+        throw new Error(`Groq ${res.status} (${model}): ${body.slice(0, 160)}`);
       }
     }
-    if (!res.ok) {
-      const finalBody = res.bodyUsed ? body : await res.text();
-      throw new Error(`Groq ${res.status} (${model}): ${String(finalBody).slice(0, 160)}`);
-    }
+
+    const data = await res.json();
+    const out = data.choices?.[0]?.message?.content || "";
+    _model.groq = model;
+    return opts.json ? safeParseJSON(out) : out;
   }
 
-  const data = await res.json();
-  const out = data.choices?.[0]?.message?.content || "";
-  return opts.json ? safeParseJSON(out) : out;
+  throw new Error(`Groq: every candidate model was rejected. Last: ${lastErr}`);
 }
 
 // --- Gemini ------------------------------------------------------------------
@@ -130,74 +166,97 @@ async function listGeminiModels(key) {
   } catch { return []; }
 }
 
-async function resolveGeminiModel(key) {
-  if (_model.gemini) return _model.gemini;
-  const pinned = getStoredKey("gemini_model");
-  if (pinned) { _model.gemini = pinned.trim(); return _model.gemini; }
+const GEMINI_OPTS = { preferred: GEMINI_PREFERRED, exclude: GEMINI_EXCLUDE, prefer: /flash/i };
 
-  const available = await listGeminiModels(key);
-  _model.gemini = pickModel(available, { preferred: GEMINI_PREFERRED, exclude: GEMINI_EXCLUDE, prefer: /flash/i })
-    || GEMINI_PREFERRED[0];
-  return _model.gemini;
+let _geminiListed = null;
+async function geminiCandidates(key) {
+  const pinned = getStoredKey("gemini_model");
+  if (pinned && !_bad.gemini.has(pinned.trim())) return [pinned.trim()];
+  if (!_geminiListed) _geminiListed = await listGeminiModels(key);
+  return candidates("gemini", _geminiListed, GEMINI_OPTS);
 }
 
 export async function callGemini(prompt, opts = {}) {
   const key = getStoredKey("gemini") || ENV_GEMINI;
   if (!key) throw new Error("Gemini key missing — open Settings (⚙) to enter it");
 
-  const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: opts.temperature ?? 0.3,
-      ...(opts.json ? { responseMimeType: "application/json" } : {}),
-    },
-  };
-  const send = (model) => fetchWithTimeout(
+  const send = (model, json) => fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), timeoutMs: 30000 }
+    {
+      method: "POST", headers: { "Content-Type": "application/json" }, timeoutMs: 30000,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: opts.temperature ?? 0.3,
+          ...(json ? { responseMimeType: "application/json" } : {}),
+        },
+      }),
+    }
   );
 
-  let model = await resolveGeminiModel(key);
-  let res = await send(model);
+  const pool = await geminiCandidates(key);
+  if (!pool.length) throw new Error("Gemini: no usable model for this key — check the key, or pin one via the gemini_model setting");
 
-  if (!res.ok) {
-    const errBody = await res.text();
-    if (isModelMissing(res.status, errBody)) {
-      resetModelCache("gemini");
-      const available = await listGeminiModels(key);
-      const next = pickModel(available, { preferred: GEMINI_PREFERRED, exclude: GEMINI_EXCLUDE, prefer: /flash/i });
-      if (next && next !== model) {
-        _model.gemini = next;
-        model = next;
-        res = await send(model);
+  let lastErr = "";
+  const order = _model.gemini && !_bad.gemini.has(_model.gemini) ? [_model.gemini, ...pool.filter((m) => m !== _model.gemini)] : pool;
+
+  for (const model of order.slice(0, 4)) {
+    let res = await send(model, opts.json);
+
+    if (!res.ok) {
+      const body = await res.text();
+      if (opts.json && isJsonModeUnsupported(body)) {
+        res = await send(model, false);
+        if (!res.ok) { lastErr = `${res.status} (${model}): ${(await res.text()).slice(0, 140)}`; _bad.gemini.add(model); continue; }
+      } else if (isModelMissing(res.status, body)) {
+        _bad.gemini.add(model);
+        lastErr = `${res.status} (${model}): ${body.slice(0, 140)}`;
+        continue;
+      } else {
+        throw new Error(`Gemini ${res.status} (${model}): ${body.slice(0, 160)}`);
       }
     }
-    if (!res.ok) {
-      const finalBody = res.bodyUsed ? errBody : await res.text();
-      throw new Error(`Gemini ${res.status} (${model}): ${String(finalBody).slice(0, 160)}`);
-    }
+
+    const data = await res.json();
+    const out = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    _model.gemini = model;
+    return opts.json ? safeParseJSON(out) : out;
   }
 
-  const data = await res.json();
-  const out = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return opts.json ? safeParseJSON(out) : out;
+  throw new Error(`Gemini: every candidate model was rejected. Last: ${lastErr}`);
 }
 
+const hasKey = (p) => (p === "groq" ? getStoredKey("groq") || ENV_GROQ : getStoredKey("gemini") || ENV_GEMINI);
+
+/* The provider that last answered successfully. In "auto" the app just uses
+   whichever service is actually working rather than making the user pick, and
+   sticks with it until it fails. */
+let _lastGood = null;
+export const activeProvider = () => _lastGood;
+
 export async function llmCall(provider, system, user, opts = {}) {
-  const order = provider === "gemini" ? ["gemini", "groq"] : ["groq", "gemini"];
+  const configured = ["groq", "gemini"].filter(hasKey);
+  if (!configured.length) throw new Error("No LLM key configured — open Settings (⚙) to add a Groq or Gemini key");
+
+  let order;
+  if (provider === "groq" || provider === "gemini") {
+    order = [provider, ...configured.filter((p) => p !== provider)]; // explicit choice first, other as fallback
+  } else {
+    order = _lastGood ? [_lastGood, ...configured.filter((p) => p !== _lastGood)] : configured;
+  }
+  order = order.filter(hasKey);
+
   let lastErr = null;
   for (const prov of order) {
     try {
-      if (prov === "groq") {
-        return await callGroq([{ role: "system", content: system }, { role: "user", content: user }], opts);
-      }
-      return await callGemini(`${system}\n\n---\n\n${user}`, opts);
+      const out = prov === "groq"
+        ? await callGroq([{ role: "system", content: system }, { role: "user", content: user }], opts)
+        : await callGemini(`${system}\n\n---\n\n${user}`, opts);
+      _lastGood = prov;
+      return out;
     } catch (e) {
       lastErr = e;
-      const hasGroq = getStoredKey("groq") || ENV_GROQ;
-      const hasGem = getStoredKey("gemini") || ENV_GEMINI;
-      if (prov === "groq" && !hasGem) break;
-      if (prov === "gemini" && !hasGroq) break;
+      if (prov === _lastGood) _lastGood = null; // stop preferring a provider that just failed
     }
   }
   throw lastErr || new Error("No LLM provider available");

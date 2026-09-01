@@ -130,6 +130,15 @@
   .xlinks a{font-size:12px;font-weight:600;color:var(--accent-ink);background:#fff;border:1px solid #E7D6AE;border-radius:8px;padding:5px 10px;text-decoration:none}
   .xlinks a:hover{border-color:var(--accent)}
 
+  /* per-source result counts — answers "why only GitHub?" on screen */
+  .srcstats{display:flex;flex-wrap:wrap;gap:7px;margin:20px 4px 0}
+  .sstat{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);background:#fff;border:1px solid var(--rule);border-radius:8px;padding:5px 11px}
+  .sstat b{font-weight:700;color:var(--ink-faint)}
+  .sstat.ok b{color:var(--match)}
+  .sstat.bad{background:#FDECEC;border-color:#F5C2C2;color:#A62121}
+  .sstat.bad b{color:#A62121}
+  .sstat em{font-style:normal;font-size:11px;opacity:.8;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
   /* community leads (Hacker News threads — not people) */
   .leadgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
   .lead{background:var(--card);border:1px solid var(--rule);border-left:3px solid #FF6600;border-radius:var(--r);padding:15px 17px}
