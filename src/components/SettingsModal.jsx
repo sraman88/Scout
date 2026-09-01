@@ -92,8 +92,8 @@ export function SettingsModal({ close, provider, setProvider }) {
         </div>
         <FieldLabel style={{ marginTop: 16 }}>PREFERRED LLM PROVIDER</FieldLabel>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setProvider("groq")} style={{ flex: 1, padding: "10px 14px", background: provider === "groq" ? T.cyan : "transparent", color: provider === "groq" ? T.bg : T.text2, border: `1px solid ${provider === "groq" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GROQ (Llama 3.3)</button>
-          <button onClick={() => setProvider("gemini")} style={{ flex: 1, padding: "10px 14px", background: provider === "gemini" ? T.cyan : "transparent", color: provider === "gemini" ? T.bg : T.text2, border: `1px solid ${provider === "gemini" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GEMINI (Flash)</button>
+          <button onClick={() => setProvider("groq")} style={{ flex: 1, padding: "10px 14px", background: provider === "groq" ? T.cyan : "transparent", color: provider === "groq" ? T.bg : T.text2, border: `1px solid ${provider === "groq" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GROQ</button>
+          <button onClick={() => setProvider("gemini")} style={{ flex: 1, padding: "10px 14px", background: provider === "gemini" ? T.cyan : "transparent", color: provider === "gemini" ? T.bg : T.text2, border: `1px solid ${provider === "gemini" ? T.cyan : T.cyanDim}`, borderRadius: 7, fontFamily: T.mono, fontSize: 11, fontWeight: 700, letterSpacing: 1.5 }}>GEMINI</button>
         </div>
         <p style={{ color: T.text3, fontSize: 11, marginTop: 8 }}>If preferred provider fails, app auto-falls back to the other.</p>
         <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
