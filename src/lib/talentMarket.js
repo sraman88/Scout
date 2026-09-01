@@ -51,7 +51,44 @@ Return STRICT JSON only, no markdown:
 }
 Rules: 3-5 bands lowest first. min/max/median are NUMBERS in the stated unit, never strings or ranges. If you cannot find real data for the region, return "bands":[] rather than guessing.`;
 
+/* One grounded call answering both questions.
+
+   Peers and pay were two separate calls fired automatically per role, which
+   burned the Gemini free-tier quota twice as fast and produced
+   "429 You exceeded your current quota". Grounded search is the expensive
+   part, and both answers come from the same research, so they share a call. */
+const MARKET_PROMPT = `${PEERS_PROMPT.replace("Return STRICT JSON only, no markdown:", "Also report current market pay for the role.\n\nReturn STRICT JSON only, no markdown, combining both answers:")}
+
+Combine into ONE object:
+{
+  "peers":[...as above...],
+  "pools":[...as above...],
+  "currency":"INR","unit":"LPA","asOf":"2026",
+  "bands":[{"level":"Mid","title":"...","years":"4-7","min":18,"max":28,"median":22,"note":"..."}],
+  "topPayers":[{"company":"Name","range":"28-40 LPA"}],
+  "caveat":"one sentence on pay-data reliability"
+}
+For pay prefer levels.fyi, AmbitionBox, Glassdoor, Payscale. Use the region's convention (India: INR lakhs per annum). min/max/median are NUMBERS. 3-5 bands, lowest first. If no real pay data exists for the region, return "bands":[].`;
+
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+
+/* A raw provider 429 is a wall of JSON that tells the user nothing actionable.
+   Quota is the one failure they can actually do something about, so say what
+   it is and what still works. */
+export function friendlyError(e) {
+  const msg = String(e?.message || e);
+  if (/\b429\b|quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) {
+    return "Gemini quota is exhausted (the free tier resets daily). The org tree and designations below still work — market data will return once quota resets, or add a Groq key as a second provider.";
+  }
+  return msg;
+}
+
+const quotaHint = (e) => (friendlyError(e) === String(e?.message || e) ? e : new Error(friendlyError(e)));
+
+/* Answers are stable for a role and cost real quota, so they are cached for
+   the session and reused rather than re-fetched on every re-render or revisit. */
+const _cache = new Map();
+const cacheKey = (s) => [s.role, s.family, s.location, s.company, (s.skills || []).slice(0, 3).join(",")].join("|").toLowerCase();
 
 function describe({ role, family, skills = [], location, company, level }) {
   return [
@@ -64,14 +101,8 @@ function describe({ role, family, skills = [], location, company, level }) {
   ].filter(Boolean).join("\n");
 }
 
-export async function resolveTalentPeers(spec, { callModel } = {}) {
-  const model = callModel || getGroundedModel();
-  if (!model) throw new Error("No grounded model configured — add a Gemini key in Settings.");
-
-  const { text, sources } = await model(`${PEERS_PROMPT}\n\n---\n\n${describe(spec)}`);
-  const out = safeParseJSON(text);
+function parsePeers(out, spec, sources) {
   const self = String(spec.company || "").trim().toLowerCase();
-
   return {
     peers: (Array.isArray(out.peers) ? out.peers : [])
       .filter((p) => p?.company && String(p.company).trim().toLowerCase() !== self)
@@ -87,13 +118,7 @@ export async function resolveTalentPeers(spec, { callModel } = {}) {
   };
 }
 
-export async function resolveSalaryBands(spec, { callModel } = {}) {
-  const model = callModel || getGroundedModel();
-  if (!model) throw new Error("No grounded model configured — add a Gemini key in Settings.");
-
-  const { text, sources } = await model(`${SALARY_PROMPT}\n\n---\n\n${describe(spec)}`);
-  const out = safeParseJSON(text);
-
+function parseSalary(out, sources) {
   const bands = (Array.isArray(out.bands) ? out.bands : [])
     .map((b) => ({
       level: String(b.level || "").trim(),
@@ -116,6 +141,42 @@ export async function resolveSalaryBands(spec, { callModel } = {}) {
     caveat: String(out.caveat || "").trim(),
     sources,
   };
+}
+
+function requireModel(callModel) {
+  const model = callModel || getGroundedModel();
+  if (!model) throw new Error("No grounded model configured — add a Gemini key in Settings.");
+  return model;
+}
+
+/* Peers + pay from one grounded call, cached per role. This is what the UI
+   uses; the two functions below remain for callers wanting just one half. */
+export async function resolveTalentMarket(spec, { callModel, force = false } = {}) {
+  const key = cacheKey(spec);
+  if (!force && _cache.has(key)) return { ..._cache.get(key), cached: true };
+
+  const model = requireModel(callModel);
+  try {
+    const { text, sources } = await model(`${MARKET_PROMPT}\n\n---\n\n${describe(spec)}`);
+    const out = safeParseJSON(text);
+    const result = { ...parsePeers(out, spec, sources), pay: parseSalary(out, sources) };
+    _cache.set(key, result);
+    return result;
+  } catch (e) {
+    throw quotaHint(e);
+  }
+}
+
+export async function resolveTalentPeers(spec, { callModel } = {}) {
+  const model = requireModel(callModel);
+  const { text, sources } = await model(`${PEERS_PROMPT}\n\n---\n\n${describe(spec)}`);
+  return parsePeers(safeParseJSON(text), spec, sources);
+}
+
+export async function resolveSalaryBands(spec, { callModel } = {}) {
+  const model = requireModel(callModel);
+  const { text, sources } = await model(`${SALARY_PROMPT}\n\n---\n\n${describe(spec)}`);
+  return parseSalary(safeParseJSON(text), sources);
 }
 
 /* Widest band across the set — used to scale the bar chart. */

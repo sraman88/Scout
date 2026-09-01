@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { searchCompanyEmployees } from "../lib/apifySearch.js";
 import { resolveCompetitors, tierOf, FAMILIES } from "../lib/relevanceEngine.js";
 import { resolveLevelMap, peopleSearchUrl } from "../lib/levelMap.js";
-import { resolveTalentPeers, resolveSalaryBands, salaryExtent, getGroundedModel } from "../lib/talentMarket.js";
+import { resolveTalentMarket, salaryExtent, getGroundedModel, friendlyError } from "../lib/talentMarket.js";
 import { getCompetitorModel } from "../lib/competitorModel.js";
 import { getStoredKey } from "../lib/storage.js";
 
@@ -113,40 +113,20 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
     if (seedCompany && !company.trim()) setCompany(seedCompany);
   }
 
-  const runPeers = useCallback(async () => {
+  /* One grounded call for both answers — see resolveTalentMarket. */
+  const runMarket = useCallback(async (force = false) => {
     if (!grounded) { setError("Add a Gemini key in Settings to map the talent market."); return; }
-    setPeersLoading(true); setError("");
+    setPeersLoading(true); setPayLoading(true); setError("");
     try {
-      setPeers(await resolveTalentPeers(marketSpec, { callModel: grounded }));
+      const m = await resolveTalentMarket(marketSpec, { callModel: grounded, force });
+      setPeers({ peers: m.peers, pools: m.pools, sources: m.sources });
+      setPay(m.pay);
     } catch (e) {
-      setError(`Talent-market lookup failed: ${e.message || e}`);
+      setError(friendlyError(e));
     } finally {
-      setPeersLoading(false);
+      setPeersLoading(false); setPayLoading(false);
     }
   }, [grounded, marketSpec]);
-
-  const runPay = useCallback(async () => {
-    if (!grounded) { setError("Add a Gemini key in Settings to pull salary benchmarks."); return; }
-    setPayLoading(true); setError("");
-    try {
-      setPay(await resolveSalaryBands(marketSpec, { callModel: grounded }));
-    } catch (e) {
-      setError(`Salary lookup failed: ${e.message || e}`);
-    } finally {
-      setPayLoading(false);
-    }
-  }, [grounded, marketSpec]);
-
-  /* Auto-run once per role: the peer list is the answer to "who else has this
-     talent", which needs no company typed in. Keyed on role+family so changing
-     the search re-runs it, but re-renders don't. */
-  const marketKey = `${roleTitle}|${fam.label}|${location}`;
-  const [ranFor, setRanFor] = useState(null);
-  if (grounded && roleTitle && marketKey !== ranFor && !peersLoading) {
-    setRanFor(marketKey);
-    setPeers(null); setPay(null);
-    queueMicrotask(() => { runPeers(); runPay(); });
-  }
 
   const run = useCallback(async (name) => {
     const target = String(name ?? company).trim();
@@ -173,7 +153,7 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
     try {
       setLevels(await resolveLevelMap({ company: target, family, roleTitle, region: "India", provider }));
     } catch (e) {
-      setError(`Level mapping failed: ${e.message || e}`);
+      setError(friendlyError(e));
     } finally {
       setLevelLoading(false);
     }
@@ -189,11 +169,32 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
       const { competitors: c } = await resolveCompetitors(target, { callModel, region: "India" });
       setCompetitors(c);
     } catch (e) {
-      setError(e.message || String(e));
+      setError(friendlyError(e));
     } finally {
       setCompLoading(false);
     }
   }, [company]);
+
+  /* Auto-runs, declared after the callbacks they invoke.
+
+     Anchoring on the company being hired for is the point: "who else has this
+     talent" only means something relative to that anchor, so both re-run when
+     the company changes. Keyed state (not an effect) so a re-render never
+     re-fires the call. */
+  const marketKey = `${roleTitle}|${fam.label}|${location}|${company.trim()}`;
+  const [ranFor, setRanFor] = useState(null);
+  if (grounded && roleTitle && marketKey !== ranFor && !peersLoading) {
+    setRanFor(marketKey);
+    setPeers(null); setPay(null);
+    queueMicrotask(() => runMarket());
+  }
+
+  const levelKey = `${company.trim()}|${family}|${roleTitle}`;
+  const [levelsFor, setLevelsFor] = useState(null);
+  if (company.trim() && roleTitle && levelKey !== levelsFor && !levelLoading) {
+    setLevelsFor(levelKey);
+    queueMicrotask(() => runLevels());
+  }
 
   const tree = useMemo(
     () => (people.length ? treeFromPeople(mapped, people, fam.label) : treeFromFamily(family, company.trim())),
@@ -225,7 +226,7 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
         <button className="btn ghost" onClick={findCompetitors} disabled={compLoading || !company.trim()}>
           {compLoading ? "…" : "Competitors"}
         </button>
-        <button className="btn ghost" onClick={() => { runPeers(); runPay(); }} disabled={peersLoading || payLoading}>
+        <button className="btn ghost" onClick={() => runMarket(true)} disabled={peersLoading || payLoading}>
           {peersLoading || payLoading ? "Reading market…" : "↻ Talent market"}
         </button>
       </div>
@@ -240,60 +241,6 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
           ))}
         </div>
       )}
-
-      <div className="maplayout">
-        <ul className="tree"><Node node={tree} /></ul>
-        <div className="levels">
-          {tierCounts.length > 0 && (
-            <>
-              <h4>People per level</h4>
-              {tierCounts.map((l, i) => <div className="lvl" key={i}><b>{l.label}</b><span>{l.value}</span></div>)}
-            </>
-          )}
-          {levels?.ladder?.length > 0 && (
-            <>
-              <h4 style={{ marginTop: tierCounts.length ? 18 : 0 }}>Levels &amp; experience</h4>
-              {levels.ladder.map((l, i) => (
-                <div className="lvl col" key={i}>
-                  <b>{l.level}<span className="band">{l.years}y</span></b>
-                  {l.titles && <span className="lt">{l.titles}</span>}
-                </div>
-              ))}
-            </>
-          )}
-          {!tierCounts.length && !levels && (
-            <>
-              <h4>Designations</h4>
-              {fam.titles.slice(0, 5).map((t) => (
-                <div className="lvl" key={t}>
-                  <a href={peopleSearchUrl(t, company.trim())} target="_blank" rel="noreferrer">{t}</a>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      </div>
-
-      {levels?.equivalents?.length > 0 && (
-        <div className="equiv">
-          <h4>
-            Equivalent roles elsewhere
-            {levels.anchor?.title ? <em> — {levels.anchor.title} at {levels.anchor.company}{levels.anchor.years ? ` · ${levels.anchor.years}y` : ""}</em> : null}
-          </h4>
-          <div className="etable">
-            {levels.equivalents.map((e, i) => (
-              <a key={i} className="erow" href={peopleSearchUrl(e.title, e.company)} target="_blank" rel="noreferrer"
-                title={`Find ${e.title} at ${e.company} on LinkedIn`}>
-                <span className="eco">{e.company}</span>
-                <span className="eti">{e.title}</span>
-                <span className="eyr">{e.years ? `${e.years}y` : ""}</span>
-                <span className="ent">{e.note || ""}</span>
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Who else has this talent — derived from the role, no company needed */}
       {(peersLoading || peers) && (
         <div className="equiv">
@@ -354,6 +301,61 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
           <Sources list={pay?.sources} />
         </div>
       )}
+
+      {/* What each level is called at the peer companies */}
+      {levels?.equivalents?.length > 0 && (
+        <div className="equiv">
+          <h4>
+            Levels to target
+            {levels.anchor?.title ? <em> — {levels.anchor.title} at {levels.anchor.company}{levels.anchor.years ? ` · ${levels.anchor.years}y` : ""}</em> : null}
+          </h4>
+          <div className="etable">
+            {levels.equivalents.map((e, i) => (
+              <a key={i} className="erow" href={peopleSearchUrl(e.title, e.company)} target="_blank" rel="noreferrer"
+                title={`Find ${e.title} at ${e.company} on LinkedIn`}>
+                <span className="eco">{e.company}</span>
+                <span className="eti">{e.title}</span>
+                <span className="eyr">{e.years ? `${e.years}y` : ""}</span>
+                <span className="ent">{e.note || ""}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Designations, last: the org shape once you know who and what level */}
+      <div className="maplayout">
+        <ul className="tree"><Node node={tree} /></ul>
+        <div className="levels">
+          {tierCounts.length > 0 && (
+            <>
+              <h4>People per level</h4>
+              {tierCounts.map((l, i) => <div className="lvl" key={i}><b>{l.label}</b><span>{l.value}</span></div>)}
+            </>
+          )}
+          {levels?.ladder?.length > 0 && (
+            <>
+              <h4 style={{ marginTop: tierCounts.length ? 18 : 0 }}>Levels &amp; experience</h4>
+              {levels.ladder.map((l, i) => (
+                <div className="lvl col" key={i}>
+                  <b>{l.level}<span className="band">{l.years}y</span></b>
+                  {l.titles && <span className="lt">{l.titles}</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {!tierCounts.length && !levels && (
+            <>
+              <h4>Designations</h4>
+              {fam.titles.slice(0, 5).map((t) => (
+                <div className="lvl" key={t}>
+                  <a href={peopleSearchUrl(t, company.trim())} target="_blank" rel="noreferrer">{t}</a>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
