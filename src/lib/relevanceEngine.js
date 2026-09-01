@@ -60,9 +60,29 @@ export const FAMILIES = {
   },
   hr: {
     label: "HR",
-    lexicon: ["human resources", "talent acquisition", "recruiter", "hrbp", "people operations", "compensation", "learning and development", "hr generalist", "people partner"],
-    titles: ["talent acquisition specialist", "recruiter", "hr business partner", "people operations manager", "hr manager", "hr generalist", "compensation and benefits manager", "learning and development manager"],
-    variants: ["hrbp", "ta", "tag", "people partner", "chro", "vp hr", "head of hr"],
+    /* Deliberately broad. This list used to cover recruiting only, so an
+       Employee Relations, Payroll or HR Ops JD scored zero for every family
+       and fell through to whichever stray word matched — a single mention of
+       "audit" was enough to sense an ER role as Finance. */
+    lexicon: [
+      "human resources", "talent acquisition", "recruiter", "recruiting", "hrbp", "people operations",
+      "compensation", "learning and development", "hr generalist", "people partner",
+      "employee relations", "industrial relations", "grievance", "disciplinary", "workplace investigation",
+      "labour law", "labor law", "posh", "employment law",
+      "payroll", "statutory compliance", "provident fund", "hris", "hrms", "workday", "successfactors",
+      "onboarding", "offboarding", "employee lifecycle", "employee engagement", "employee experience",
+      "performance management", "succession planning", "talent management", "workforce planning",
+      "people analytics", "hr operations", "total rewards", "benefits administration",
+      "organisational development", "organizational development", "employer branding",
+    ],
+    titles: [
+      "talent acquisition specialist", "recruiter", "hr business partner", "people operations manager",
+      "hr manager", "hr generalist", "compensation and benefits manager", "learning and development manager",
+      "employee relations manager", "employee relations specialist", "industrial relations manager",
+      "payroll specialist", "payroll manager", "hr operations manager", "hris analyst",
+      "talent management lead", "employee engagement manager", "hr director", "people partner",
+    ],
+    variants: ["hrbp", "ta", "tag", "people partner", "chro", "vp hr", "head of hr", "er", "ir", "hr ops"],
     sources: [
       { id: "linkedin", label: "LinkedIn", weight: 5, why: "Primary graph for HR practitioners." },
       { id: "serp", label: "HR communities / events", weight: 3, why: "Speakers and community leads." },
@@ -83,8 +103,17 @@ export const FAMILIES = {
   },
   finance: {
     label: "Finance",
-    lexicon: ["finance", "financial analyst", "fp&a", "controller", "accountant", "chartered accountant", "treasury", "audit", "accounts payable", "accounts receivable"],
-    titles: ["financial analyst", "fp&a analyst", "finance manager", "controller", "accountant", "chartered accountant", "treasury analyst", "internal auditor"],
+    lexicon: [
+      "finance", "financial analyst", "fp&a", "controller", "accountant", "chartered accountant",
+      "treasury", "internal audit", "statutory audit", "accounts payable", "accounts receivable",
+      "financial reporting", "month end close", "general ledger", "taxation", "gst", "transfer pricing",
+      "budgeting", "forecasting", "variance analysis", "ifrs", "gaap", "revenue recognition",
+    ],
+    titles: [
+      "financial analyst", "fp&a analyst", "finance manager", "controller", "accountant",
+      "chartered accountant", "treasury analyst", "internal auditor", "finance business partner",
+      "accounts manager", "taxation manager", "financial controller",
+    ],
     variants: ["ca", "fpna", "ap", "ar", "cfo", "vp finance", "head of finance"],
     sources: [
       { id: "linkedin", label: "LinkedIn", weight: 5, why: "Primary graph for finance professionals." },

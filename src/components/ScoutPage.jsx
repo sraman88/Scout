@@ -7,6 +7,7 @@ import { proxyFetch } from "../lib/proxyFetch.js";
 import { fetchUrlContent, searchLinkedInCandidates, searchGoogleResults } from "../lib/apifySearch.js";
 import { searchGitHubUsers } from "../lib/github.js";
 import { searchStackOverflow } from "../lib/stackoverflow.js";
+import { searchLinkedInXray } from "../lib/xraySearch.js";
 import { searchHackerNewsLeads } from "../lib/hackernews.js";
 import { summarizeLeads } from "../lib/summarizeLeads.js";
 import { scoreBatch } from "../lib/scoreProfile.js";
@@ -56,6 +57,25 @@ const toCardProfile = (p) => ({
 });
 
 const keyOf = (p) => `${p.source || ""}:${p.username || p.profile_url || p.name || ""}`;
+
+/* buildSpec fills `titles` with the whole family list, in taxonomy order — so
+   an Employee Relations JD searched for "talent acquisition specialist" simply
+   because it sits first under HR. The LLM's role_title fixes this when a key
+   is configured; this is the free fallback: put the titles the JD actually
+   talks about first. */
+function titlesByRelevance(titles = [], text = "") {
+  const hay = ` ${text.toLowerCase()} `;
+  const score = (t) => {
+    const words = String(t).toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    if (!words.length) return 0;
+    if (hay.includes(` ${String(t).toLowerCase()} `)) return 100;      // exact phrase
+    return words.filter((w) => hay.includes(w)).length / words.length; // partial overlap
+  };
+  return [...titles]
+    .map((t, i) => ({ t, s: score(t), i }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.t);
+}
 
 /* HN's search is keyword-relevance based, so the concatenated title list
    ("software engineer senior software engineer backend engineer frontend
@@ -177,6 +197,9 @@ export default function ScoutPage() {
       if (!s.company && derived.company) s.company = derived.company;
       if (!s.seniorities?.length && LEVEL_MAP[derived.seniority]) s.answers = { ...s.answers, level: LEVEL_MAP[derived.seniority] };
     }
+    // Whatever the JD actually names outranks the family's default ordering.
+    s.titles = titlesByRelevance(s.titles, `${raw} ${derived?.role_title || ""}`);
+
     const query = s.titles?.length ? s.titles.slice(0, 4).join(" ") : raw.slice(0, 200);
     const loc = s.locations?.[0] || "India";
     const primarySkill = s.skills?.[0] || "";
@@ -196,12 +219,17 @@ export default function ScoutPage() {
     /* Only hit the sources this craft actually lives on. Searching GitHub and
        StackOverflow for an HR business partner can only return engineers —
        which is precisely how software engineers ended up in an HR search. */
+    /* LinkedIn via the paid actor when a token exists, otherwise the keyless
+       DuckDuckGo X-ray. Without this, HR/sales/finance searches had no usable
+       source at all and always reported "no candidates from any source". */
+    const hasApify = !!getStoredKey("apify");
     const allow = new Set((gated || gateSources(s)).map((x) => x.id));
+    const wantsLinkedIn = allow.has("linkedin") || allow.has("serp");
+
     const tasks = [
-      allow.has("linkedin") && { label: "LinkedIn", p: searchLinkedInCandidates({ query, location: loc, maxItems: 15, timeout: 30 }) },
-      allow.has("serp") || allow.has("linkedin")
-        ? { label: "Google", p: searchGoogleResults({ query: `${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim() }) }
-        : null,
+      wantsLinkedIn && hasApify && { label: "LinkedIn", p: searchLinkedInCandidates({ query, location: loc, maxItems: 15, timeout: 30 }) },
+      wantsLinkedIn && hasApify && { label: "Google", p: searchGoogleResults({ query: `${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim() }) },
+      wantsLinkedIn && !hasApify && { label: "LinkedIn X-ray", p: searchLinkedInXray({ titles: s.titles || [], location: loc, extra: s.skills?.slice(0, 1) || [] }) },
       allow.has("github") && { label: "GitHub", p: searchGitHubUsers({ ghLanguage: primarySkill, ghLocation: loc }) },
       allow.has("stackoverflow") && { label: "StackOverflow", p: searchStackOverflow({ ghLanguage: primarySkill, profQuery: query }) },
     ].filter(Boolean);

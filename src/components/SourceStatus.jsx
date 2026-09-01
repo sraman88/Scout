@@ -15,7 +15,9 @@ export default function SourceStatus({ spec, family }) {
   const technical = family === "engineering" || family === "techsupport";
 
   const rows = [
-    { id: "linkedin", label: "LinkedIn", live: hasApify, note: hasApify ? "live" : NEEDS_APIFY },
+    hasApify
+      ? { id: "linkedin", label: "LinkedIn", live: true, note: "live · Apify actor" }
+      : { id: "linkedin", label: "LinkedIn X-ray", live: true, note: "live · keyless, lower yield" },
     { id: "google", label: "Google", live: hasApify, note: hasApify ? "live" : NEEDS_APIFY },
     { id: "github", label: "GitHub", live: technical, note: technical ? (hasGithub ? "live" : "live · unauthenticated, low rate limit") : "not used for this role" },
     { id: "stackoverflow", label: "StackOverflow", live: technical, note: technical ? "live" : "not used for this role" },
@@ -42,7 +44,7 @@ export default function SourceStatus({ spec, family }) {
 
       {!hasApify && (
         <div className="ssxray">
-          <b>No Apify token — LinkedIn and Google can’t be searched in-app.</b> Add one in Settings, or run these free X-ray searches:
+          <b>No Apify token — LinkedIn is searched via a keyless X-ray</b> (fewer results, no headshots). Add a token in Settings for full search, or widen the net manually:
           <div className="xlinks">
             {xrays.map((x) => (
               <a key={x.label} href={`https://www.google.com/search?q=${encodeURIComponent(x.q)}`} target="_blank" rel="noreferrer">{x.label} ↗</a>
