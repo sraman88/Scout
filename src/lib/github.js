@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "./http.js";
 import { ENV_GH } from "../theme.js";
 import { getStoredKey } from "./storage.js";
 
@@ -21,7 +22,7 @@ export async function searchGitHubUsers({ ghLanguage, ghLocation, ghMinFollowers
     }
   }
   const url = `https://api.github.com/search/users?q=${encodeURIComponent(q)}&per_page=20&sort=followers`;
-  const res = await fetch(url, { headers: ghHeaders() });
+  const res = await fetchWithTimeout(url, { headers: ghHeaders(), timeoutMs: 12000 });
   if (!res.ok) {
     if (res.status === 403) throw new Error("GitHub rate-limited. Add a GitHub token in Settings (⚙) to get 5000 req/hour instead of 60.");
     throw new Error(`GitHub ${res.status}`);

@@ -1,5 +1,6 @@
 import { getStoredKey } from "./storage.js";
 import { asText, asArray } from "./normalize.js";
+import { fetchWithTimeout } from "./http.js";
 
 /* Different harvestapi actors validate profileScraperMode against different
    enum formats — one wants the plain label ("Short"), another wants the
@@ -10,9 +11,18 @@ import { asText, asArray } from "./normalize.js";
    try both and let whichever the actor actually accepts win. */
 const PROFILE_MODE_VARIANTS = ["Short", "Short ($4 per 1k)"];
 
-async function runActor(actor, token, input, timeout = 90) {
+/* `timeout` is the actor's server-side budget in seconds; the client aborts a
+   few seconds later so a wedged run can't hang the page. run-sync holds the
+   connection open for the run's whole duration, which is what made searches
+   feel like they never returned. */
+async function runActor(actor, token, input, timeout = 45) {
   const apiUrl = `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items?token=${token}&timeout=${timeout}`;
-  const res = await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  const res = await fetchWithTimeout(apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    timeoutMs: (timeout + 5) * 1000,
+  });
   if (!res.ok) {
     const t = await res.text();
     if (res.status === 401) throw new Error("Apify token rejected — check the token in Settings");
@@ -41,7 +51,7 @@ async function runActorWithModeFallback(actor, token, baseInput, timeout) {
    single-profile lookup — used to auto-populate the Profiles tab from a
    parsed JD. Same account token as the profile-scraper actor; different
    actor since search and single-profile lookup are separate Apify actors. */
-export async function searchLinkedInCandidates({ query, location, maxItems = 20, timeout = 90 }) {
+export async function searchLinkedInCandidates({ query, location, maxItems = 20, timeout = 45 }) {
   const token = getStoredKey("apify");
   if (!token) throw new Error("Apify token missing — open Settings to enable live LinkedIn search");
   const actor = (getStoredKey("apify_search_actor") || "harvestapi~linkedin-profile-search").trim();
@@ -80,7 +90,7 @@ export async function searchGoogleResults({ query, maxResults = 10 }) {
   if (!token) throw new Error("Apify token missing — open Settings to enable live Google search");
   const actor = (getStoredKey("apify_google_actor") || "apify~google-search-scraper").trim();
   const input = { queries: query || "", maxPagesPerQuery: 1, countryCode: "in" };
-  const data = await runActor(actor, token, input, 90);
+  const data = await runActor(actor, token, input, 45);
   if (!Array.isArray(data) || data.length === 0) return [];
   const organic = asArray(data[0]?.organicResults);
   return organic.slice(0, maxResults).map((r) => ({
@@ -118,7 +128,7 @@ export async function searchCompanyEmployees({ companyDomain, companyName, title
     locations: asArray(locations),
     maxItems,
   };
-  const data = await runActorWithModeFallback(actor, token, input, 90);
+  const data = await runActorWithModeFallback(actor, token, input, 60);
   if (!Array.isArray(data)) return [];
   return data
     .filter((item) => !item.error && item.succeeded !== false)

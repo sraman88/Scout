@@ -7,13 +7,16 @@ import { proxyFetch } from "../lib/proxyFetch.js";
 import { fetchUrlContent, searchLinkedInCandidates, searchGoogleResults } from "../lib/apifySearch.js";
 import { searchGitHubUsers } from "../lib/github.js";
 import { searchStackOverflow } from "../lib/stackoverflow.js";
-import { searchHackerNews } from "../lib/hackernews.js";
+import { searchHackerNewsLeads } from "../lib/hackernews.js";
+import { summarizeLeads } from "../lib/summarizeLeads.js";
 import { scoreBatch } from "../lib/scoreProfile.js";
 import { revealContact } from "../lib/contactReveal.js";
 import { getCompetitorModel } from "../lib/competitorModel.js";
 import IntakePanel from "./IntakePanel.jsx";
 import CandidateCard from "./CandidateCard.jsx";
+import LeadCard from "./LeadCard.jsx";
 import CompanyMap from "./CompanyMap.jsx";
+import SourceStatus from "./SourceStatus.jsx";
 
 // ScoutPage — the whole product on one screen. No tabs:
 //   1 Search (keyword | JD link | paste JD)  ->  senseFamily
@@ -54,6 +57,16 @@ const toCardProfile = (p) => ({
 
 const keyOf = (p) => `${p.source || ""}:${p.username || p.profile_url || p.name || ""}`;
 
+/* HN's search is keyword-relevance based, so the concatenated title list
+   ("software engineer senior software engineer backend engineer frontend
+   engineer") matched nothing useful and hammered a rate-limited endpoint.
+   One title plus the primary skill is both cheaper and more relevant. */
+function leadQuery(spec) {
+  const title = (spec.titles?.[0] || "").split(/\s+/).slice(0, 3).join(" ");
+  const skill = spec.skills?.[0] || "";
+  return [title, skill].filter(Boolean).join(" ").trim() || "hiring";
+}
+
 export default function ScoutPage() {
   const [mode, setMode] = useState("kw");
   const [raw, setRaw] = useState("");
@@ -72,6 +85,7 @@ export default function ScoutPage() {
   const [sourcesUsed, setSourcesUsed] = useState([]);
   const [sensing, setSensing] = useState(false);
   const [derived, setDerived] = useState(null);
+  const [leads, setLeads] = useState([]);
 
   const intakeRef = useRef(null);
   const resultsRef = useRef(null);
@@ -167,7 +181,7 @@ export default function ScoutPage() {
     const loc = s.locations?.[0] || "India";
     const primarySkill = s.skills?.[0] || "";
 
-    setSearching(true); setError(""); setWarning(""); setResults([]); setCount(0);
+    setSearching(true); setError(""); setWarning(""); setResults([]); setCount(0); setLeads([]);
     scrollTo(resultsRef);
 
     const warnings = [];
@@ -184,16 +198,30 @@ export default function ScoutPage() {
        which is precisely how software engineers ended up in an HR search. */
     const allow = new Set((gated || gateSources(s)).map((x) => x.id));
     const tasks = [
-      allow.has("linkedin") && { label: "LinkedIn", p: searchLinkedInCandidates({ query, location: loc, maxItems: 15, timeout: 60 }) },
-      { label: "Google", p: searchGoogleResults({ query: `${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim() }) },
+      allow.has("linkedin") && { label: "LinkedIn", p: searchLinkedInCandidates({ query, location: loc, maxItems: 15, timeout: 30 }) },
+      allow.has("serp") || allow.has("linkedin")
+        ? { label: "Google", p: searchGoogleResults({ query: `${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim() }) }
+        : null,
       allow.has("github") && { label: "GitHub", p: searchGitHubUsers({ ghLanguage: primarySkill, ghLocation: loc }) },
       allow.has("stackoverflow") && { label: "StackOverflow", p: searchStackOverflow({ ghLanguage: primarySkill, profQuery: query }) },
-      allow.has("github") && { label: "HackerNews", p: searchHackerNews({ profQuery: query, mustHave: s.skills || [] }) },
     ].filter(Boolean);
     setSourcesUsed(tasks.map((t) => t.label));
+
+    /* Hacker News threads are leads, not people — fetched alongside but kept
+       out of the candidate feed entirely. */
+    const leadsPromise = allow.has("github")
+      ? searchHackerNewsLeads({ query: leadQuery(s), mustHave: s.skills || [] }).catch(() => [])
+      : Promise.resolve([]);
+
     await Promise.all(tasks.map(({ label, p }) => p.then(capture).catch((e) => warnings.push(`${label}: ${e.message || e}`))));
     setSearching(false);
     if (warnings.length) setWarning(warnings.join(" · "));
+
+    leadsPromise.then(async (raw) => {
+      if (!raw.length) return;
+      setLeads(raw);
+      setLeads(await summarizeLeads(raw, { provider: getStoredKey("provider_pref") || "groq" }));
+    });
 
     if (!harvested.length) {
       setError("No candidates came back from any source. Check your API keys in Settings, or loosen the search.");
@@ -280,9 +308,10 @@ export default function ScoutPage() {
             callModel={getCompetitorModel()}
             onFamilyChange={setFamily}
             onSpec={setSpec}
-            onRun={(s) => runSearch(s)}
+            onRun={(s, q, gated) => runSearch(s, q, gated)}
           />
         )}
+        {family && <SourceStatus spec={spec} family={family} />}
       </div>
 
       {/* STEP 3 — profiles, on the same page */}
@@ -325,10 +354,20 @@ export default function ScoutPage() {
             </div>
           </>
         )}
+
+        {/* Community leads — threads, not people, so a separate shape */}
+        {leads.length > 0 && (
+          <>
+            <div className="rescount"><b>{leads.length}</b> community lead{leads.length === 1 ? "" : "s"} · Hacker News</div>
+            <div className="leadgrid">
+              {leads.map((l) => <LeadCard key={l.id} lead={l} />)}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Company mapping — same page, contrasting panel, org tree */}
-      <CompanyMap family={family} />
+      <CompanyMap family={family} seedCompany={derived?.company || ""} roleTitle={derived?.role_title || ""} />
     </>
   );
 }

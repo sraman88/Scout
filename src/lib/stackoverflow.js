@@ -1,9 +1,10 @@
+import { fetchWithTimeout } from "./http.js";
 export async function searchStackOverflow({ ghLanguage, profQuery }) {
   let tag = (ghLanguage || profQuery.split(/\s+/)[0] || "javascript").toLowerCase().trim();
   const tagMap = { js: "javascript", ts: "typescript", py: "python", node: "node.js", react: "reactjs", vue: "vue.js" };
   tag = tagMap[tag] || tag;
   const url = `https://api.stackexchange.com/2.3/tags/${encodeURIComponent(tag)}/top-answerers/all_time?site=stackoverflow&pagesize=20`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, { timeoutMs: 12000 });
   if (!res.ok) throw new Error(`StackOverflow ${res.status} — tag "${tag}" may not exist. Try a different language.`);
   const data = await res.json();
   if (data.error_id) throw new Error(`SO API: ${data.error_message || "tag not found"}`);

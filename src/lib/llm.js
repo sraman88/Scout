@@ -1,5 +1,6 @@
 import { ENV_GROQ, ENV_GEMINI } from "../theme.js";
 import { getStoredKey } from "./storage.js";
+import { fetchWithTimeout } from "./http.js";
 
 export function safeParseJSON(text) {
   if (!text) throw new Error("Empty response from LLM");
@@ -14,7 +15,8 @@ export function safeParseJSON(text) {
 export async function callGroq(messages, opts = {}) {
   const key = getStoredKey("groq") || ENV_GROQ;
   if (!key) throw new Error("Groq key missing — open Settings (⚙) to enter it");
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const res = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
+    timeoutMs: 30000,
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
@@ -29,10 +31,55 @@ export async function callGroq(messages, opts = {}) {
   return opts.json ? safeParseJSON(out) : out;
 }
 
+/* Gemini model resolution.
+
+   This used to hardcode `gemini-1.5-flash`, which Google retired — every
+   scoring call then failed with a 404 telling us to call ListModels. So we do
+   exactly that: try the current preferred names, and if none are served to
+   this key, ask the API which models it actually has and pick a flash-class
+   one that supports generateContent. The winner is cached for the session, so
+   this survives the next retirement without another code change. */
+const GEMINI_PREFERRED = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+let _geminiModel = null;
+
+async function listGeminiModels(key) {
+  const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, { timeoutMs: 10000 });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => String(m.name || "").replace(/^models\//, ""))
+    .filter(Boolean);
+}
+
+async function resolveGeminiModel(key) {
+  if (_geminiModel) return _geminiModel;
+  const pinned = getStoredKey("gemini_model");
+  if (pinned) { _geminiModel = pinned.trim(); return _geminiModel; }
+
+  const available = await listGeminiModels(key);
+  if (available.length) {
+    const pick =
+      GEMINI_PREFERRED.find((m) => available.includes(m)) ||
+      available.find((m) => /flash/i.test(m) && !/(vision|embedding|thinking)/i.test(m)) ||
+      available.find((m) => /gemini/i.test(m) && !/(vision|embedding)/i.test(m));
+    if (pick) { _geminiModel = pick; return pick; }
+  }
+  _geminiModel = GEMINI_PREFERRED[0]; // nothing listed — try the newest and let the error surface
+  return _geminiModel;
+}
+
+async function geminiGenerate(model, key, body) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  return fetchWithTimeout(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), timeoutMs: 30000,
+  });
+}
+
 export async function callGemini(prompt, opts = {}) {
   const key = getStoredKey("gemini") || ENV_GEMINI;
   if (!key) throw new Error("Gemini key missing — open Settings (⚙) to enter it");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
@@ -40,8 +87,26 @@ export async function callGemini(prompt, opts = {}) {
       ...(opts.json ? { responseMimeType: "application/json" } : {}),
     },
   };
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!res.ok) { const t = await res.text(); throw new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`); }
+
+  let model = await resolveGeminiModel(key);
+  let res = await geminiGenerate(model, key, body);
+
+  // Model retired or not served to this key — re-resolve once against ListModels.
+  if (res.status === 404) {
+    _geminiModel = null;
+    const available = await listGeminiModels(key);
+    const next = GEMINI_PREFERRED.find((m) => available.includes(m)) || available.find((m) => /flash/i.test(m));
+    if (next && next !== model) {
+      _geminiModel = next;
+      model = next;
+      res = await geminiGenerate(model, key, body);
+    }
+  }
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Gemini ${res.status} (${model}): ${t.slice(0, 160)}`);
+  }
   const data = await res.json();
   const out = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return opts.json ? safeParseJSON(out) : out;

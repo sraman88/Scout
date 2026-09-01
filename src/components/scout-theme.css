@@ -117,6 +117,33 @@
   .cta .g.star{flex:0 0 44px}
   .cta .g.star.on{background:var(--accent-wash);border-color:var(--accent);color:var(--accent)}
 
+  /* source status strip */
+  .srcstatus{margin-top:14px}
+  .ssrow{display:flex;flex-wrap:wrap;gap:8px}
+  .ss{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--ink-faint);background:#fff;border:1px solid var(--rule);border-radius:999px;padding:5px 12px}
+  .ss i{width:7px;height:7px;border-radius:50%;background:#CBD3DE;flex:0 0 7px}
+  .ss.on{color:var(--ink)} .ss.on i{background:var(--match)}
+  .ss em{font-style:normal;font-weight:500;color:var(--ink-faint);font-size:11px}
+  .ssxray{margin-top:11px;background:#FFF6E6;border:1px solid #F0DAB0;border-radius:11px;padding:11px 14px;font-size:12.5px;line-height:1.55;color:var(--warn)}
+  .ssxray b{color:#8A5300}
+  .xlinks{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .xlinks a{font-size:12px;font-weight:600;color:var(--accent-ink);background:#fff;border:1px solid #E7D6AE;border-radius:8px;padding:5px 10px;text-decoration:none}
+  .xlinks a:hover{border-color:var(--accent)}
+
+  /* community leads (Hacker News threads — not people) */
+  .leadgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .lead{background:var(--card);border:1px solid var(--rule);border-left:3px solid #FF6600;border-radius:var(--r);padding:15px 17px}
+  .lhead{display:flex;align-items:flex-start;gap:9px;margin-bottom:8px}
+  .lsrc{width:17px;height:17px;flex:0 0 17px;border-radius:4px;background:#FF6600;color:#fff;font-size:10px;font-weight:800;display:grid;place-items:center;margin-top:2px}
+  .ltitle{font-size:14px;font-weight:700;line-height:1.35;text-decoration:none;color:var(--ink)}
+  .ltitle:hover{color:var(--accent)}
+  .lflag{font-size:10px;font-weight:700;color:var(--match);background:var(--match-wash);border-radius:999px;padding:2px 8px;white-space:nowrap;margin-left:auto}
+  .lsum{font-size:12.5px;line-height:1.5;color:var(--ink-soft);margin-bottom:6px}
+  .lval{font-size:11.5px;font-weight:600;color:var(--accent-ink);margin-bottom:9px}
+  .lmeta{display:flex;flex-wrap:wrap;gap:11px;font-size:11.5px;color:var(--ink-faint)}
+  .lmeta a{color:var(--ink-faint);text-decoration:none}
+  .lmeta a:hover{color:var(--accent)}
+
   /* company map — contrasting dark panel + tree */
   .map{margin-top:30px;background:var(--contrast);border-radius:18px;padding:26px;color:var(--on-contrast)}
   .map .mh{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:4px}
@@ -159,7 +186,29 @@
 
   .levels{border-left:1px solid var(--contrast-line);padding-left:20px}
   .levels h4{font-size:12px;font-weight:700;color:#A7AEBC;margin:0 0 12px;text-transform:uppercase;letter-spacing:.04em}
-  .lvl{display:flex;justify-content:space-between;font-size:12.5px;padding:7px 0;border-bottom:1px solid var(--contrast-line)}
+  .lvl{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:7px 0;border-bottom:1px solid var(--contrast-line)}
   .lvl b{font-weight:600}
   .lvl span{color:#8B93A3}
+  .lvl a{color:var(--on-contrast);text-decoration:none}
+  .lvl a:hover{color:var(--highlight)}
+  .lvl.col{flex-direction:column;gap:3px}
+  .lvl.col b{display:flex;justify-content:space-between;gap:10px}
   .lvl .band{color:var(--highlight);font-weight:600}
+  .lvl .lt{color:#8B93A3;font-size:11.5px;line-height:1.45}
+
+  /* tree nodes link out to real people */
+  .nodelink{text-decoration:none;display:inline-block}
+  .nodelink:hover .node{border-color:var(--highlight)}
+  .nodelink:hover .role{color:var(--highlight)}
+
+  /* level equivalence across companies */
+  .equiv{margin-top:26px;padding-top:20px;border-top:1px solid var(--contrast-line)}
+  .equiv h4{font-size:12px;font-weight:700;color:#A7AEBC;margin:0 0 12px;text-transform:uppercase;letter-spacing:.04em}
+  .equiv h4 em{font-style:normal;text-transform:none;letter-spacing:0;color:var(--highlight);font-weight:600}
+  .etable{display:grid;gap:6px}
+  .erow{display:grid;grid-template-columns:150px 1fr 62px 1.1fr;gap:12px;align-items:center;padding:9px 12px;background:var(--contrast-2);border:1px solid var(--contrast-line);border-radius:9px;text-decoration:none;color:var(--on-contrast);font-size:12.5px}
+  .erow:hover{border-color:var(--highlight)}
+  .eco{font-weight:700}
+  .eyr{color:var(--highlight);font-weight:600}
+  .ent{color:#8B93A3;font-size:11.5px}
+  @media(max-width:760px){.erow{grid-template-columns:1fr 1fr;row-gap:4px}.ent{grid-column:1/-1}}

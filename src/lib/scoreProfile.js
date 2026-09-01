@@ -1,6 +1,7 @@
 import { llmCall } from "./llm.js";
 import { getStoredKey } from "./storage.js";
 import { rankLocal } from "./relevanceEngine.js";
+import { mapPool } from "./http.js";
 
 /* Completes the pipeline relevanceEngine.js documents:
    sense -> buildSpec -> buildQuery -> [fetch] -> prefilter (free)
@@ -54,24 +55,36 @@ function tierFromScore(score) {
    nothing) then LLM-scores only the survivors, in parallel. One candidate's
    scoring failure never drops it — falls back to a prescore-derived,
    clearly-labelled "Unscored" tier instead. */
+/* Scores at most `max` survivors, `concurrency` at a time.
+
+   This previously fired every survivor at the LLM simultaneously via
+   Promise.all, which rate-limits on free tiers and makes the whole search look
+   hung. The prefilter already ranks by prescore, so capping takes the best
+   candidates rather than an arbitrary slice; anything beyond the cap still
+   renders, carrying its deterministic score. */
 export async function scoreBatch(profiles, spec, opts = {}) {
+  const { max = 24, concurrency = 4 } = opts;
   const survivors = rankLocal(profiles, spec, opts.threshold);
-  const scored = await Promise.all(survivors.map(async (p) => {
+  const head = survivors.slice(0, max);
+  const tail = survivors.slice(max).map((p) => ({ ...p, match: deterministicMatch(p, "Beyond the scoring cap — deterministic pre-filter score.") }));
+
+  const scored = await mapPool(head, concurrency, async (p) => {
     try {
-      const match = await scoreProfile(p, spec, opts);
-      return { ...p, match };
+      return { ...p, match: await scoreProfile(p, spec, opts) };
     } catch (e) {
-      return {
-        ...p,
-        match: {
-          score: Math.round((p.pre?.prescore || 0) * 100),
-          tier: "Unscored",
-          reason: `LLM scoring failed (${e.message || e}) — showing the deterministic pre-filter score instead.`,
-          matched: p.pre?.reasons || [],
-          missed: [],
-        },
-      };
+      return { ...p, match: deterministicMatch(p, `LLM scoring failed (${e.message || e}) — showing the deterministic pre-filter score instead.`) };
     }
-  }));
-  return scored.sort((a, b) => (b.match.score || 0) - (a.match.score || 0));
+  });
+
+  return [...scored, ...tail].sort((a, b) => (b.match.score || 0) - (a.match.score || 0));
+}
+
+function deterministicMatch(p, reason) {
+  return {
+    score: Math.round((p.pre?.prescore || 0) * 100),
+    tier: "Unscored",
+    reason,
+    matched: p.pre?.reasons || [],
+    missed: [],
+  };
 }
