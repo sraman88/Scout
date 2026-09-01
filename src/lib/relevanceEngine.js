@@ -98,12 +98,13 @@ export const FAMILIES = {
 // Deterministic first. Returns confidence so the UI can offer "not X? switch",
 // and exposes a tie-break hook for the LLM when two families are close.
 export function senseFamily(text, { llmTieBreak } = {}) {
-  const s = " " + String(text || "").toLowerCase() + " ";
+  // Whole-word matching, so "java" no longer fires on "javascript".
+  const words = tokenize(text);
   const scores = {};
   for (const [id, f] of Object.entries(FAMILIES)) {
     let n = 0;
-    for (const k of f.lexicon) if (s.includes(k)) n += 1;
-    for (const t of f.titles) if (s.includes(t)) n += 2; // full title = stronger signal
+    for (const k of f.lexicon) if (containsPhrase(words, k)) n += 1;
+    for (const t of f.titles) if (containsPhrase(words, t)) n += 2; // full title = stronger signal
     scores[id] = n;
   }
   const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
@@ -255,6 +256,68 @@ export function tierOf(titleOrSeniority = "") {
   return "Unclassified";
 }
 
+// --- Title matching: distinctive tokens only ---------------------------------
+// Job titles share a lot of org filler — "manager", "specialist", "senior",
+// "development". Matching a spec title on ANY of its words is what made an HR
+// search return software engineers: "Software Development Engineer" hit
+// "development" from HR's "learning and development manager", and "Engineering
+// Manager" hit "manager" from "hr manager". So: only family-DISTINCTIVE tokens
+// can carry a partial match, tokens are compared whole (never as substrings,
+// which made "ta" match "data"), and a title that plainly belongs to another
+// family is vetoed outright however well it scores.
+const GENERIC_TITLE_TOKENS = new Set([
+  "senior", "junior", "staff", "principal", "lead", "head", "chief", "vice", "president",
+  "manager", "director", "executive", "officer", "associate", "assistant", "specialist",
+  "analyst", "consultant", "coordinator", "administrator", "representative", "generalist",
+  "intern", "trainee", "apprentice", "global", "regional", "national", "area", "zonal",
+  "country", "team", "group", "and", "the", "for", "with", "new",
+  // cross-family words that belong to two or more taxonomies at once
+  "business", "development", "operations", "management", "learning", "technical",
+  "technology", "customer", "product", "account", "accounts", "partner",
+]);
+
+const tokenize = (s) => String(s || "").toLowerCase().split(/[^a-z0-9&+]+/).filter(Boolean);
+
+/* Whole-word phrase containment. Substring matching is not safe here: short
+   variants like "ta" (talent acquisition) or "ae" (account executive) are
+   inside ordinary words, so `"data science educator".includes("ta")` scored a
+   YouTube data-science creator as a 75% title match on an HR search. */
+function containsPhrase(haystackTokens, phrase) {
+  const p = tokenize(phrase);
+  if (!p.length || p.length > haystackTokens.length) return false;
+  outer: for (let i = 0; i <= haystackTokens.length - p.length; i++) {
+    for (let j = 0; j < p.length; j++) if (haystackTokens[i + j] !== p[j]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+const _distinctiveCache = new Map();
+function distinctiveTokens(family) {
+  if (_distinctiveCache.has(family)) return _distinctiveCache.get(family);
+  const f = FAMILIES[family] || FAMILIES.sales;
+  const set = new Set();
+  for (const phrase of [...f.lexicon, ...f.titles, ...f.variants]) {
+    for (const w of tokenize(phrase)) if (w.length >= 2 && !GENERIC_TITLE_TOKENS.has(w)) set.add(w);
+  }
+  _distinctiveCache.set(family, set);
+  return set;
+}
+
+// True when the candidate's own title reads as a different craft than the spec's.
+// Cheap second net behind the token rules: an ML engineer can still collect a
+// stray HR token, but "machine learning engineer" senses as engineering, so it
+// never reaches the scorer on an HR search.
+export function crossFamilyVeto(title, family) {
+  const t = String(title || "").trim();
+  if (!t) return false;
+  const { scores } = senseFamily(t);
+  const own = scores[family] || 0;
+  let bestId = null, bestN = 0;
+  for (const [id, n] of Object.entries(scores)) if (n > bestN) { bestId = id; bestN = n; }
+  return bestN > 0 && bestId !== family && bestN > own;
+}
+
 // --- Deterministic prefilter: the free relevance gate ------------------------
 // Returns {keep, prescore 0..1, reasons[]}. Run on EVERY scraped profile; only
 // send survivors to the LLM scorer. Unspecified criteria don't penalise.
@@ -264,10 +327,22 @@ export function prefilter(profile, spec, threshold = 0.35) {
   const w = spec.weights;
   const reasons = [];
 
+  // Wrong craft entirely — out before anything else can rescue it.
+  if (crossFamilyVeto(profile.title, spec.family)) {
+    return { keep: false, prescore: 0, reasons: ["different role family"] };
+  }
+
   // title
   let titleScore = 0;
-  if (spec.titles.some((t) => title.includes(t.toLowerCase()))) { titleScore = 1; reasons.push("title match"); }
-  else if (spec.titles.some((t) => t.split(" ").some((word) => word.length > 3 && title.includes(word)))) { titleScore = 0.6; reasons.push("partial title"); }
+  const titleTokenList = tokenize(title);
+  if (spec.titles.some((t) => containsPhrase(titleTokenList, t))) {
+    titleScore = 1; reasons.push("title match");
+  } else {
+    const distinct = distinctiveTokens(spec.family);
+    const hits = [...new Set(titleTokenList)].filter((t) => distinct.has(t));
+    if (hits.length >= 2) { titleScore = 0.75; reasons.push(`title signal: ${hits.slice(0, 3).join(", ")}`); }
+    else if (hits.length === 1) { titleScore = 0.5; reasons.push(`title signal: ${hits[0]}`); }
+  }
 
   // skills / must-haves
   let skillScore = 1;

@@ -1,106 +1,334 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import "./scout-theme.css";
-import { senseFamily } from "../lib/relevanceEngine.js";
-import IntakePanel from "./IntakePanel";
-import CandidateCard from "./CandidateCard";
-import CompanyMap from "./CompanyMap";
+import { senseFamily, gateSources, FAMILIES } from "../lib/relevanceEngine.js";
+import { deriveRole, LEVEL_MAP } from "../lib/senseRole.js";
+import { getStoredKey } from "../lib/storage.js";
+import { proxyFetch } from "../lib/proxyFetch.js";
+import { fetchUrlContent, searchLinkedInCandidates, searchGoogleResults } from "../lib/apifySearch.js";
+import { searchGitHubUsers } from "../lib/github.js";
+import { searchStackOverflow } from "../lib/stackoverflow.js";
+import { searchHackerNews } from "../lib/hackernews.js";
+import { scoreBatch } from "../lib/scoreProfile.js";
+import { revealContact } from "../lib/contactReveal.js";
+import { getCompetitorModel } from "../lib/competitorModel.js";
+import IntakePanel from "./IntakePanel.jsx";
+import CandidateCard from "./CandidateCard.jsx";
+import CompanyMap from "./CompanyMap.jsx";
 
-// ScoutPage — the single-page shell. Mounts search -> smart intake -> profiles
-// -> company map, all on one screen. Sample data below renders it identical to
-// the mockup out of the box; swap the marked blocks for your real data.
-//   search (kw/jd/paste) -> senseFamily -> IntakePanel -> onRun(spec,query)
-//   -> your Apify fetch + prefilter + scoreBatch -> setResults(CandidateCard[])
+// ScoutPage — the whole product on one screen. No tabs:
+//   1 Search (keyword | JD link | paste JD)  ->  senseFamily
+//   2 Smart intake (fortifies the spec)      ->  buildSpec/buildQuery
+//   3 Profiles, scored, rendered below       ->  prefilter + scoreBatch
+//   + Company mapping, as a tree, on the same page.
 
 const HINTS = {
-  kw: "Boolean supported — strings, parentheses, AND / OR / NOT.",
-  jd: "Works on Lever, Greenhouse, Workday, Ashby, careers pages. LinkedIn job links → use Paste.",
-  paste: "Paste raw JD text — Scout parses it into a role spec and pre-fills intake.",
+  kw: "Boolean supported — quoted strings, parentheses, AND / OR / NOT.",
+  jd: "Works on Lever, Greenhouse, Workday, Ashby, careers pages. LinkedIn job links are blocked — use Paste.",
+  paste: "Paste raw JD text — Scout senses the role family and pre-fills intake.",
 };
 
-// --- sample data (replace with real results / map) ---------------------------
-const SAMPLE_RESULTS = [
-  { name: "Vaishnavi Katkar", title: "Enterprise Sales Manager", org: "CloudCo", location: "Mumbai, India",
-    match: { score: 96, reason: "Quota-carrying enterprise seller, in-region, 3 of 4 target skills.", matched: ["Enterprise", "SaaS", "Quota"], missed: ["Cyber"] },
-    sources: [{ id: "linkedin", label: "LinkedIn" }] },
-  { name: "Rahul Deshpande", title: "Regional Sales Manager", org: "PayU", location: "Pune, India",
-    match: { score: 92, reason: "Hunter profile with named-account wins; President’s Club 2024 on record.", matched: ["Hunter", "President’s Club", "Mid-market"], missed: [] },
-    sources: [{ id: "linkedin", label: "LinkedIn" }, { id: "cv", label: "CV" }] },
-  { name: "Ananya Rao", title: "Account Executive", org: "Freshworks", location: "Bengaluru, India",
-    match: { score: 89, reason: "Strong SaaS AE; enterprise motion emerging, no President’s Club signal yet.", matched: ["SaaS", "Enterprise"], missed: ["President’s Club"] },
-    sources: [{ id: "linkedin", label: "LinkedIn" }] },
-];
-const SAMPLE_TREE = {
-  role: "VP Sales, India", meta: "1 · leadership", head: true,
-  children: [
-    { role: "Director — West", meta: "Mumbai", children: [{ role: "RSM", meta: "6 AEs" }, { role: "RSM", meta: "5 AEs" }] },
-    { role: "Director — South", meta: "Bengaluru", children: [{ role: "RSM", meta: "7 AEs" }, { role: "RSM", meta: "4 AEs" }] },
-  ],
-};
-const SAMPLE_LEVELS = [
-  { label: "VP / Head", value: "1–2" }, { label: "Director", value: "4" },
-  { label: "RSM / Manager", value: "~12" }, { label: "AE", band: "₹18–34L" }, { label: "BDR / SDR", band: "₹8–15L" },
-];
+/* prefilter/scoreProfile read title/summary/skills; the search helpers return
+   `bio`/`company` instead — map across without dropping the fields that Save
+   and contact-reveal need off the original object. */
+const toIntakeProfile = (p) => ({
+  ...p,
+  title: p.title || p.bio || "",
+  org: p.company || p.org || "",
+  summary: p.bio || p.summary || "",
+  skills: p.skills || [],
+});
+
+const SOURCE_LABEL = { github: "GitHub", linkedin: "LinkedIn", stackoverflow: "StackOverflow", hn: "Hacker News", google: "Google" };
+
+const toCardProfile = (p) => ({
+  name: p.name,
+  title: p.title || p.bio || "",
+  org: p.org || p.company || "",
+  location: p.location,
+  avatarUrl: p.avatar_url,
+  url: p.profile_url,
+  match: p.match,
+  sources: [{ id: p.source, label: SOURCE_LABEL[p.source] || p.source, url: p.profile_url, stars: p.stars }],
+  _raw: p,
+});
+
+const keyOf = (p) => `${p.source || ""}:${p.username || p.profile_url || p.name || ""}`;
 
 export default function ScoutPage() {
   const [mode, setMode] = useState("kw");
   const [raw, setRaw] = useState("");
+  const [jdUrl, setJdUrl] = useState("");
   const [family, setFamily] = useState(null);
-  const [results, setResults] = useState(SAMPLE_RESULTS); // replace via onRun
-  const [count, setCount] = useState(18);
 
-  const run = () => setFamily(senseFamily(raw).family || "sales");
+  const [spec, setSpec] = useState(null);
+  const [results, setResults] = useState([]);
+  const [count, setCount] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [scoring, setScoring] = useState(false);
+  const [fetchingJd, setFetchingJd] = useState(false);
+  const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
+  const [saved, setSaved] = useState([]);
+  const [sourcesUsed, setSourcesUsed] = useState([]);
+  const [sensing, setSensing] = useState(false);
+  const [derived, setDerived] = useState(null);
 
-  // Wire your pipeline here: buildQuery -> Apify -> prefilter -> scoreBatch.
-  const onRun = async (spec /*, query, sources */) => {
-    // const scored = await runYourPipeline(query);
-    // setResults(scored); setCount(scored.length);
+  const intakeRef = useRef(null);
+  const resultsRef = useRef(null);
+
+  const scrollTo = (ref) => setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+
+  /* Step 1 — sense the craft from whatever the recruiter typed/pasted. The
+     instant keyword sense lands first so intake opens with no wait, then the
+     LLM reading (which understands "HR lead for the engineering org") corrects
+     it if they disagree. */
+  async function sense() {
+    const text = raw.trim();
+    if (!text) return;
+    setError(""); setWarning("");
+    const quick = senseFamily(text);
+    setFamily(quick.family || "sales");
+    scrollTo(intakeRef);
+
+    setSensing(true);
+    try {
+      const { family: f, derived, source } = await deriveRole(text, { provider: getStoredKey("provider_pref") || "groq" });
+      setFamily(f);
+      setDerived(derived);
+      if (source === "keywords" && !quick.family) {
+        setWarning("Couldn't confidently sense the role family — defaulted to Sales. Correct it in smart intake below.");
+      }
+    } finally {
+      setSensing(false);
+    }
+  }
+
+  async function fetchJd() {
+    const url = jdUrl.trim();
+    if (!url) return;
+    setFetchingJd(true); setError("");
+    try {
+      let text = "";
+      let proxyErr = null;
+      try {
+        const stripped = (await proxyFetch(url))
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/\s+/g, " ").trim();
+        if (stripped.length < 200) throw new Error("returned too little content (likely a JS-rendered page)");
+        text = stripped;
+      } catch (e) { proxyErr = e; }
+
+      if (proxyErr && getStoredKey("apify")) text = await fetchUrlContent(url);
+      else if (proxyErr) {
+        throw new Error(/linkedin\.com/i.test(url)
+          ? "LinkedIn job pages block fetching. Copy the JD text and use Paste JD instead, or add an Apify token in Settings."
+          : `Couldn't fetch this page (${proxyErr.message}). Paste the JD text instead, or add an Apify token in Settings.`);
+      }
+      const jd = text.slice(0, 8000);
+      setRaw(jd);
+      setMode("paste");
+      setFamily(senseFamily(jd).family || "sales");
+      scrollTo(intakeRef);
+      setSensing(true);
+      try {
+        const { family: f, derived: d } = await deriveRole(jd, { provider: getStoredKey("provider_pref") || "groq" });
+        setFamily(f); setDerived(d);
+      } finally {
+        setSensing(false);
+      }
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setFetchingJd(false);
+    }
+  }
+
+  /* Step 3 — the real pipeline. Fires from smart intake's Run search, so the
+     spec (titles/skills/level/company) is always what gates and scores. */
+  const runSearch = useCallback(async (nextSpec, _query, gated) => {
+    const base = nextSpec || spec;
+    if (!base) return;
+
+    /* Fold the LLM's reading of the JD into the intake spec — its concrete
+       role title and must-haves beat the family's generic title list, which
+       is what the prefilter and the scorer both match against. */
+    const s = { ...base };
+    if (derived) {
+      if (derived.role_title) s.titles = [...new Set([derived.role_title.toLowerCase(), ...s.titles])];
+      if (derived.must_have?.length) s.skills = [...new Set([...derived.must_have.map((x) => String(x).toLowerCase()), ...s.skills])];
+      if (derived.location) s.locations = [derived.location, ...s.locations];
+      if (!s.company && derived.company) s.company = derived.company;
+      if (!s.seniorities?.length && LEVEL_MAP[derived.seniority]) s.answers = { ...s.answers, level: LEVEL_MAP[derived.seniority] };
+    }
+    const query = s.titles?.length ? s.titles.slice(0, 4).join(" ") : raw.slice(0, 200);
+    const loc = s.locations?.[0] || "India";
+    const primarySkill = s.skills?.[0] || "";
+
+    setSearching(true); setError(""); setWarning(""); setResults([]); setCount(0);
+    scrollTo(resultsRef);
+
+    const warnings = [];
+    let harvested = [];
+    const capture = (items) => {
+      const mapped = (items || []).map(toIntakeProfile);
+      harvested = harvested.concat(mapped);
+      setResults((prev) => [...prev, ...mapped]);
+      setCount((n) => n + mapped.length);
+    };
+
+    /* Only hit the sources this craft actually lives on. Searching GitHub and
+       StackOverflow for an HR business partner can only return engineers —
+       which is precisely how software engineers ended up in an HR search. */
+    const allow = new Set((gated || gateSources(s)).map((x) => x.id));
+    const tasks = [
+      allow.has("linkedin") && { label: "LinkedIn", p: searchLinkedInCandidates({ query, location: loc, maxItems: 15, timeout: 60 }) },
+      { label: "Google", p: searchGoogleResults({ query: `${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim() }) },
+      allow.has("github") && { label: "GitHub", p: searchGitHubUsers({ ghLanguage: primarySkill, ghLocation: loc }) },
+      allow.has("stackoverflow") && { label: "StackOverflow", p: searchStackOverflow({ ghLanguage: primarySkill, profQuery: query }) },
+      allow.has("github") && { label: "HackerNews", p: searchHackerNews({ profQuery: query, mustHave: s.skills || [] }) },
+    ].filter(Boolean);
+    setSourcesUsed(tasks.map((t) => t.label));
+    await Promise.all(tasks.map(({ label, p }) => p.then(capture).catch((e) => warnings.push(`${label}: ${e.message || e}`))));
+    setSearching(false);
+    if (warnings.length) setWarning(warnings.join(" · "));
+
+    if (!harvested.length) {
+      setError("No candidates came back from any source. Check your API keys in Settings, or loosen the search.");
+      return;
+    }
+
+    /* prefilter culls the wrong craft for free, then only survivors are
+       LLM-scored — that gate is what stops engineers landing in an HR search. */
+    setScoring(true);
+    try {
+      const scored = await scoreBatch(harvested, s);
+      setResults(scored);
+      setCount(scored.length);
+      if (!scored.length) {
+        setWarning(
+          `All ${harvested.length} raw results were filtered out as the wrong role family — none of them were actually ${FAMILIES[s.family]?.label || s.family} people. ` +
+          (getStoredKey("apify")
+            ? "Try correcting the sensed family above, or loosen the intake answers."
+            : "Non-technical roles live on LinkedIn: add an Apify token in Settings to search it.")
+        );
+      }
+    } catch (e) {
+      setWarning((w) => (w ? w + " · " : "") + `Scoring failed: ${e.message || e}`);
+    } finally {
+      setScoring(false);
+    }
+  }, [spec, raw, derived]);
+
+  const toggleSave = (profile) => {
+    const p = profile._raw || profile;
+    setSaved((prev) => (prev.some((x) => keyOf(x) === keyOf(p)) ? prev.filter((x) => keyOf(x) !== keyOf(p)) : [...prev, p]));
   };
 
-  return (
-    <div className="wrap">
-      <div className="top">
-        <div className="brand">S<span>C</span>OUT</div>
-        <div className="tag">Sourcing intelligence · one screen</div>
-      </div>
+  const busy = searching || scoring;
+  const scored = results.filter((r) => r.match);
 
+  return (
+    <>
       <div className="steps">
         <div className={"stp" + (raw ? " on" : "")}><span className="n">1</span>Search</div><span className="arw">→</span>
         <div className={"stp" + (family ? " on" : "")}><span className="n">2</span>Smart intake</div><span className="arw">→</span>
         <div className={"stp" + (results.length ? " on" : "")}><span className="n">3</span>Profiles</div>
       </div>
 
-      {/* STEP 1 — unified search */}
+      {/* STEP 1 — one unified search box */}
       <div className="panel">
+        <div className="ph">Search</div>
+        <div className="psub">Start with keywords, a job-description link, or the JD text itself.</div>
         <div className="modes">
-          {["kw", "jd", "paste"].map((mm) => (
-            <button key={mm} className={mode === mm ? "on" : ""} onClick={() => setMode(mm)}>
-              {mm === "kw" ? "Keyword" : mm === "jd" ? "JD link" : "Paste JD"}
-            </button>
+          {[["kw", "Keyword"], ["jd", "JD link"], ["paste", "Paste JD"]].map(([k, label]) => (
+            <button key={k} className={mode === k ? "on" : ""} onClick={() => setMode(k)}>{label}</button>
           ))}
         </div>
-        <div className="searchrow">
-          {mode === "paste"
-            ? <textarea rows={3} placeholder="Paste the job description here…" value={raw} onChange={(e) => setRaw(e.target.value)} />
-            : <input placeholder={mode === "kw" ? '("enterprise account executive" OR "sales manager") AND SaaS AND (Mumbai OR Pune)' : "https://boards.greenhouse.io/acme/jobs/12345"}
-                value={raw} onChange={(e) => setRaw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && run()} />}
-          <button className="btn" onClick={run}>{mode === "kw" ? "Find" : mode === "jd" ? "Fetch JD" : "Parse"}</button>
-        </div>
+
+        {mode === "jd" ? (
+          <div className="searchrow">
+            <input placeholder="https://boards.greenhouse.io/acme/jobs/12345" value={jdUrl}
+              onChange={(e) => setJdUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && fetchJd()} />
+            <button className="btn" onClick={fetchJd} disabled={fetchingJd || !jdUrl.trim()}>{fetchingJd ? "Fetching…" : "Fetch JD"}</button>
+          </div>
+        ) : (
+          <div className="searchrow">
+            {mode === "paste"
+              ? <textarea rows={5} placeholder="Paste the full job description here…" value={raw} onChange={(e) => setRaw(e.target.value)} />
+              : <input placeholder='("HR business partner" OR "talent acquisition") AND (Mumbai OR Pune)'
+                  value={raw} onChange={(e) => setRaw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sense()} />}
+            <button className="btn" onClick={sense} disabled={!raw.trim()}>{mode === "kw" ? "Find" : "Parse"}</button>
+          </div>
+        )}
         <div className="hintline">{HINTS[mode]}</div>
+        {error && <div className="errbox">{error}</div>}
+        {warning && <div className="warnbox">{warning}</div>}
       </div>
 
-      {/* STEP 2 — smart intake */}
-      {family && <IntakePanel family={family} rawString={raw} onRun={onRun} />}
+      {/* STEP 2 — smart intake fortifies the spec before anything is fetched */}
+      <div ref={intakeRef}>
+        {family && (
+          <IntakePanel
+            family={family}
+            rawString={raw}
+            busy={busy}
+            sensing={sensing}
+            derived={derived}
+            callModel={getCompetitorModel()}
+            onFamilyChange={setFamily}
+            onSpec={setSpec}
+            onRun={(s) => runSearch(s)}
+          />
+        )}
+      </div>
 
-      {/* STEP 3 — profiles */}
-      {results.length > 0 && (
-        <>
-          <div className="rescount"><b>{count}</b> profiles · sorted by match</div>
-          <div className="grid">{results.map((p, i) => <CandidateCard key={i} profile={p} />)}</div>
-        </>
-      )}
+      {/* STEP 3 — profiles, on the same page */}
+      <div ref={resultsRef}>
+        {busy && (
+          <div className="statusbar">
+            <span className="spinner" />
+            {searching
+              ? `Searching ${sourcesUsed.join(", ") || "sources"}…`
+              : `Scoring ${results.length} candidate${results.length === 1 ? "" : "s"} against the spec…`}
+          </div>
+        )}
 
-      {/* Company map */}
-      <CompanyMap title="Company mapping — Salesforce, India Sales" tree={SAMPLE_TREE} levels={SAMPLE_LEVELS} />
-    </div>
+        {!busy && !results.length && family && (
+          <div className="empty">
+            {sourcesUsed.length
+              ? "Nothing relevant survived filtering — see the note above."
+              : "Run the search from smart intake — scored profiles appear here."}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <>
+            <div className="rescount">
+              <b>{count}</b> profile{count === 1 ? "" : "s"}
+              {scored.length ? " · sorted by match" : " · scoring pending"}
+              {saved.length ? ` · ${saved.length} saved` : ""}
+            </div>
+            <div className="grid">
+              {results.map((p, i) => (
+                <CandidateCard
+                  key={keyOf(p) || i}
+                  profile={toCardProfile(p)}
+                  saved={saved.some((x) => keyOf(x) === keyOf(p))}
+                  onOpen={(_p, url) => url && window.open(url, "_blank", "noopener,noreferrer")}
+                  onSave={toggleSave}
+                  onRevealEmail={(cp) => revealContact(cp._raw)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Company mapping — same page, contrasting panel, org tree */}
+      <CompanyMap family={family} />
+    </>
   );
 }
