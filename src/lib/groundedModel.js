@@ -14,12 +14,17 @@
 //   const { competitors } = await resolveCompetitors(company, { callModel, industry, region:"India" });
 // -----------------------------------------------------------------------------
 
-// Gemini + Google Search grounding. You already hold a Gemini key, so this is
-// ZERO new keys. Browser-callable, like your current Gemini calls.
-export function geminiGrounded(apiKey, model = "gemini-2.5-flash") {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-  return async (prompt) => {
-    const r = await fetch(url, {
+/* Gemini + Google Search grounding. You already hold a Gemini key, so this is
+   ZERO new keys. Browser-callable, like the other Gemini calls.
+
+   Model names are not pinned to one string here for the same reason they are
+   not pinned in llm.js — Google retires them and every call 404s. */
+const GROUNDED_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+
+async function callGrounded(apiKey, prompt, preferred) {
+  const tried = [];
+  for (const model of [preferred, ...GROUNDED_MODELS].filter((m, i, a) => m && a.indexOf(m) === i)) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
@@ -27,9 +32,39 @@ export function geminiGrounded(apiKey, model = "gemini-2.5-flash") {
         tools: [{ google_search: {} }], // <- grounding
       }),
     });
-    if (!r.ok) throw new Error(`Gemini ${r.status}: ${await r.text()}`);
-    const data = await r.json();
-    return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+    if (r.ok) return r.json();
+    const body = await r.text();
+    tried.push(model);
+    if (!(r.status === 404 || r.status === 403 || /not found|does not exist/i.test(body))) {
+      throw new Error(`Gemini ${r.status} (${model}): ${body.slice(0, 160)}`);
+    }
+  }
+  throw new Error(`Gemini: no grounded model available (tried ${tried.join(", ")})`);
+}
+
+const textOf = (data) => (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+
+/* The citations behind a grounded answer. Surfacing these is what makes
+   figures like salary bands checkable rather than something the model
+   asserted — the recruiter can open the source and see the number. */
+function sourcesOf(data) {
+  const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  const seen = new Set();
+  return chunks
+    .map((c) => ({ title: c.web?.title || "", uri: c.web?.uri || "" }))
+    .filter((s) => s.uri && !seen.has(s.uri) && seen.add(s.uri))
+    .slice(0, 8);
+}
+
+export function geminiGrounded(apiKey, model) {
+  return async (prompt) => textOf(await callGrounded(apiKey, prompt, model));
+}
+
+/* Same call, but keeps the citations alongside the answer. */
+export function geminiGroundedWithSources(apiKey, model) {
+  return async (prompt) => {
+    const data = await callGrounded(apiKey, prompt, model);
+    return { text: textOf(data), sources: sourcesOf(data) };
   };
 }
 

@@ -432,7 +432,13 @@ export default function ScoutPage() {
       </div>
 
       {/* Company mapping — same page, contrasting panel, org tree */}
-      <CompanyMap family={family} seedCompany={derived?.company || ""} roleTitle={derived?.role_title || ""} />
+      <CompanyMap
+        family={family}
+        seedCompany={derived?.company || ""}
+        roleTitle={derived?.role_title || spec?.titles?.[0] || ""}
+        skills={spec?.skills || []}
+        location={spec?.locations?.[0] || "India"}
+      />
     </>
   );
 }

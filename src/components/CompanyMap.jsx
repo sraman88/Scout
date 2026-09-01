@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { searchCompanyEmployees } from "../lib/apifySearch.js";
 import { resolveCompetitors, tierOf, FAMILIES } from "../lib/relevanceEngine.js";
 import { resolveLevelMap, peopleSearchUrl } from "../lib/levelMap.js";
+import { resolveTalentPeers, resolveSalaryBands, salaryExtent, getGroundedModel } from "../lib/talentMarket.js";
 import { getCompetitorModel } from "../lib/competitorModel.js";
 import { getStoredKey } from "../lib/storage.js";
 
@@ -77,7 +78,7 @@ function treeFromFamily(family, company) {
   };
 }
 
-export default function CompanyMap({ family = "sales", seedCompany = "", roleTitle = "" }) {
+export default function CompanyMap({ family = "sales", seedCompany = "", roleTitle = "", skills = [], location = "India" }) {
   const [company, setCompany] = useState(seedCompany);
   const [people, setPeople] = useState([]);
   const [mapped, setMapped] = useState("");
@@ -88,9 +89,20 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
   const [levels, setLevels] = useState(null);
   const [levelLoading, setLevelLoading] = useState(false);
 
+  const [peers, setPeers] = useState(null);
+  const [peersLoading, setPeersLoading] = useState(false);
+  const [pay, setPay] = useState(null);
+  const [payLoading, setPayLoading] = useState(false);
+
   const fam = FAMILIES[family] || FAMILIES.sales;
   const hasApify = !!getStoredKey("apify");
   const provider = getStoredKey("provider_pref") || "auto";
+  const grounded = getGroundedModel();
+
+  const marketSpec = useMemo(
+    () => ({ role: roleTitle || fam.label, family: fam.label, skills, location, company: company.trim() }),
+    [roleTitle, fam.label, skills, location, company]
+  );
 
   /* Seed from the JD when it changes, without clobbering anything already
      typed. Adjusting state during render (rather than in an effect) is the
@@ -99,6 +111,41 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
   if (seedCompany !== seenSeed) {
     setSeenSeed(seedCompany);
     if (seedCompany && !company.trim()) setCompany(seedCompany);
+  }
+
+  const runPeers = useCallback(async () => {
+    if (!grounded) { setError("Add a Gemini key in Settings to map the talent market."); return; }
+    setPeersLoading(true); setError("");
+    try {
+      setPeers(await resolveTalentPeers(marketSpec, { callModel: grounded }));
+    } catch (e) {
+      setError(`Talent-market lookup failed: ${e.message || e}`);
+    } finally {
+      setPeersLoading(false);
+    }
+  }, [grounded, marketSpec]);
+
+  const runPay = useCallback(async () => {
+    if (!grounded) { setError("Add a Gemini key in Settings to pull salary benchmarks."); return; }
+    setPayLoading(true); setError("");
+    try {
+      setPay(await resolveSalaryBands(marketSpec, { callModel: grounded }));
+    } catch (e) {
+      setError(`Salary lookup failed: ${e.message || e}`);
+    } finally {
+      setPayLoading(false);
+    }
+  }, [grounded, marketSpec]);
+
+  /* Auto-run once per role: the peer list is the answer to "who else has this
+     talent", which needs no company typed in. Keyed on role+family so changing
+     the search re-runs it, but re-renders don't. */
+  const marketKey = `${roleTitle}|${fam.label}|${location}`;
+  const [ranFor, setRanFor] = useState(null);
+  if (grounded && roleTitle && marketKey !== ranFor && !peersLoading) {
+    setRanFor(marketKey);
+    setPeers(null); setPay(null);
+    queueMicrotask(() => { runPeers(); runPay(); });
   }
 
   const run = useCallback(async (name) => {
@@ -164,7 +211,7 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
     <div className="map">
       <div className="mh">
         <h3>Company mapping{mapped && people.length ? ` — ${mapped}` : ""}</h3>
-        <span className="msub">org shape · level equivalence · who to poach</span>
+        <span className="msub">org shape · who has this talent · what it pays</span>
       </div>
 
       <div className="maprow">
@@ -177,6 +224,9 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
         </button>
         <button className="btn ghost" onClick={findCompetitors} disabled={compLoading || !company.trim()}>
           {compLoading ? "…" : "Competitors"}
+        </button>
+        <button className="btn ghost" onClick={() => { runPeers(); runPay(); }} disabled={peersLoading || payLoading}>
+          {peersLoading || payLoading ? "Reading market…" : "↻ Talent market"}
         </button>
       </div>
 
@@ -243,6 +293,111 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
           </div>
         </div>
       )}
+
+      {/* Who else has this talent — derived from the role, no company needed */}
+      {(peersLoading || peers) && (
+        <div className="equiv">
+          <h4>
+            Companies with similar talent
+            {peers?.peers?.length ? <em> — {peers.peers.length} for {roleTitle || fam.label}</em> : null}
+          </h4>
+          {peersLoading && <div className="mapnote">Reading the market…</div>}
+
+          {peers?.peers?.length > 0 && (
+            <div className="etable">
+              {peers.peers.map((p, i) => (
+                <a key={i} className="erow peer" href={peopleSearchUrl(p.equivalentTitle || roleTitle || fam.label, p.company)}
+                  target="_blank" rel="noreferrer" title={`Find ${p.equivalentTitle || roleTitle} at ${p.company}`}>
+                  <span className="eco">
+                    {p.company}
+                    {p.hiring && <i className="hiring" title="Evidence of a live or recent opening">hiring</i>}
+                  </span>
+                  <span className="eti">{p.equivalentTitle || "—"}</span>
+                  <span className="ent">{p.why}</span>
+                </a>
+              ))}
+            </div>
+          )}
+
+          {peers?.pools?.length > 0 && (
+            <div className="pools">
+              <b>Less obvious pools</b>
+              {peers.pools.map((p, i) => <span key={i}>{p}</span>)}
+            </div>
+          )}
+          <Sources list={peers?.sources} />
+        </div>
+      )}
+
+      {/* Pay benchmarks, always shown with the sources behind them */}
+      {(payLoading || pay) && (
+        <div className="equiv">
+          <h4>
+            Market pay
+            {pay?.asOf ? <em> — {pay.asOf}{pay.unit ? ` · ${pay.currency} ${pay.unit}` : ""}</em> : null}
+          </h4>
+          {payLoading && <div className="mapnote">Pulling salary benchmarks…</div>}
+
+          {pay && !pay.bands.length && !payLoading && (
+            <div className="mapnote">No reliable published data found for this role and region — better to leave it blank than invent a number.</div>
+          )}
+
+          {pay?.bands?.length > 0 && <PayBands pay={pay} />}
+
+          {pay?.topPayers?.length > 0 && (
+            <div className="pools">
+              <b>Pays above market</b>
+              {pay.topPayers.map((t, i) => <span key={i}>{t.company} · {t.range}</span>)}
+            </div>
+          )}
+          {pay?.caveat && <div className="mapnote">{pay.caveat}</div>}
+          <Sources list={pay?.sources} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Horizontal range bars — a band's position and width carry the comparison
+   far better than a table of numbers does. */
+function PayBands({ pay }) {
+  const extent = salaryExtent(pay.bands);
+  return (
+    <div className="paybands">
+      {pay.bands.map((b, i) => {
+        const lo = b.min ?? b.median, hi = b.max ?? b.median;
+        const left = extent ? ((lo - extent.lo) / (extent.hi - extent.lo)) * 100 : 0;
+        const width = extent ? Math.max(((hi - lo) / (extent.hi - extent.lo)) * 100, 2) : 100;
+        return (
+          <div className="payrow" key={i}>
+            <span className="plevel">
+              {b.level}
+              {b.years && <i>{b.years}y</i>}
+            </span>
+            <span className="ptrack">
+              <span className="pbar" style={{ left: `${left}%`, width: `${width}%` }} />
+            </span>
+            <span className="pfig">
+              {lo}{hi !== lo ? `–${hi}` : ""} <i>{pay.unit}</i>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Citations are the point: every figure above should be checkable at origin. */
+function Sources({ list }) {
+  if (!list?.length) return null;
+  return (
+    <div className="srcline">
+      <b>Sources</b>
+      {list.map((s, i) => (
+        <a key={i} href={s.uri} target="_blank" rel="noreferrer" title={s.title}>
+          {(s.title || new URL(s.uri).hostname).replace(/^www\./, "").slice(0, 34)}
+        </a>
+      ))}
     </div>
   );
 }

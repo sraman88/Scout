@@ -218,7 +218,31 @@
   .etable{display:grid;gap:6px}
   .erow{display:grid;grid-template-columns:150px 1fr 62px 1.1fr;gap:12px;align-items:center;padding:9px 12px;background:var(--contrast-2);border:1px solid var(--contrast-line);border-radius:9px;text-decoration:none;color:var(--on-contrast);font-size:12.5px}
   .erow:hover{border-color:var(--highlight)}
-  .eco{font-weight:700}
+  .eco{font-weight:700;display:flex;align-items:center;gap:7px}
   .eyr{color:var(--highlight);font-weight:600}
   .ent{color:#8B93A3;font-size:11.5px}
-  @media(max-width:760px){.erow{grid-template-columns:1fr 1fr;row-gap:4px}.ent{grid-column:1/-1}}
+  .erow.peer{grid-template-columns:170px 1fr 1.2fr}
+  .hiring{font-style:normal;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#0E9F6E;background:rgba(14,159,110,.14);border-radius:999px;padding:2px 7px}
+  @media(max-width:760px){.erow,.erow.peer{grid-template-columns:1fr 1fr;row-gap:4px}.ent{grid-column:1/-1}}
+
+  /* talent pools / top payers */
+  .pools{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:12px;font-size:12px}
+  .pools b{color:#A7AEBC;font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-right:2px}
+  .pools span{background:var(--contrast-2);border:1px solid var(--contrast-line);border-radius:999px;padding:4px 11px;color:var(--on-contrast)}
+
+  /* pay bands */
+  .paybands{display:grid;gap:9px}
+  .payrow{display:grid;grid-template-columns:150px 1fr 108px;gap:12px;align-items:center;font-size:12.5px}
+  .plevel{font-weight:600;display:flex;align-items:baseline;gap:6px}
+  .plevel i{font-style:normal;font-size:11px;color:#8B93A3}
+  .ptrack{position:relative;height:9px;background:var(--contrast-2);border:1px solid var(--contrast-line);border-radius:999px}
+  .pbar{position:absolute;top:-1px;bottom:-1px;background:linear-gradient(90deg,var(--accent),var(--highlight));border-radius:999px;min-width:6px}
+  .pfig{text-align:right;font-weight:700;color:var(--highlight);white-space:nowrap}
+  .pfig i{font-style:normal;font-weight:500;font-size:10.5px;color:#8B93A3;margin-left:3px}
+  @media(max-width:620px){.payrow{grid-template-columns:110px 1fr 92px;gap:8px}}
+
+  /* citations */
+  .srcline{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--contrast-line);font-size:11.5px}
+  .srcline b{color:#A7AEBC;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .srcline a{color:#8B93A3;text-decoration:none;border-bottom:1px dotted #4A5261}
+  .srcline a:hover{color:var(--highlight);border-bottom-color:var(--highlight)}
