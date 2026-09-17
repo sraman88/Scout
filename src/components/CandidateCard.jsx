@@ -7,11 +7,15 @@ import { useState } from "react";
 const SRC_BG = { linkedin: "#0A66C2", github: "#24292F", google: "#4285F4", stackoverflow: "#F48024", hn: "#FF6600", cv: "#1e1e1e" };
 const SRC_LTR = { linkedin: "in", github: "GH", google: "G", stackoverflow: "SO", hn: "Y", cv: "CV" };
 const TIER_CLASS = { Strong: "strong", Good: "good", Maybe: "maybe", Weak: "weak", Unscored: "unscored" };
+const DOC_BG = { pdf: "#B3261E", doc: "#1A56DB", ppt: "#C2410C" };
+const DOC_LTR = { pdf: "PDF", doc: "DOC", ppt: "PPT" };
 
-export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onSave, saved = false }) {
+export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onSave, onFindDocs, onPreviewDoc, saved = false }) {
   const [revealing, setRevealing] = useState(false);
   const [contact, setContact] = useState(null);
   const [revealError, setRevealError] = useState("");
+  const [finding, setFinding] = useState(false);
+  const [docError, setDocError] = useState("");
 
   const m = profile.match || {};
   const url = profile.url || (profile.linkedinUrn ? `https://www.linkedin.com/in/${profile.linkedinUrn}` : null);
@@ -26,6 +30,21 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
       setRevealError(e.message || String(e));
     } finally {
       setRevealing(false);
+    }
+  }
+
+  /* Documents are fetched per candidate, on click — one SERP call for the
+     person you're actually interested in, not for all fifteen results. */
+  async function findDocs() {
+    if (!onFindDocs || finding) return;
+    setFinding(true); setDocError("");
+    try {
+      const found = await onFindDocs(profile);
+      if (!found?.length) setDocError("No public CV or portfolio found.");
+    } catch (e) {
+      setDocError(e.message || String(e));
+    } finally {
+      setFinding(false);
     }
   }
 
@@ -66,6 +85,19 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
         </div>
       ) : null}
 
+      {profile.docs?.length ? (
+        <div className="srcs">
+          {profile.docs.map((d, i) => (
+            <button key={i} className="s doc" onClick={() => onPreviewDoc?.(d)} title={d.title || d.url}>
+              <span className="b" style={{ background: DOC_BG[d.type] || "#1e1e1e" }}>{DOC_LTR[d.type] || "DOC"}</span>
+              {d.title && d.title.length > 22 ? d.title.slice(0, 22) + "\u2026" : (d.title || (d.type || "doc").toUpperCase())}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {docError && <div className="contact bad">{docError}</div>}
+
       {(contact || revealError) && (
         <div className={"contact" + (revealError ? " bad" : "")}>
           {revealError
@@ -95,6 +127,9 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
         <button className="g" onClick={reveal} disabled={revealing || !!contact}>
           {revealing ? "Revealing…" : contact ? "Revealed" : "Email + social"}
         </button>
+        {onFindDocs && !profile.docs?.length && (
+          <button className="g" onClick={findDocs} disabled={finding}>{finding ? "Looking…" : "Find CV"}</button>
+        )}
         <button className={"g star" + (saved ? " on" : "")} onClick={() => onSave?.(profile)} title={saved ? "Saved" : "Save"}>★</button>
       </div>
     </article>

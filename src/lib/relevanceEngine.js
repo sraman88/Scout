@@ -18,6 +18,13 @@
 
 export const DEFAULT_LOCATIONS = ["India", "Bengaluru", "Mumbai", "Pune", "Gurgaon", "Hyderabad", "Chennai", "Noida"];
 
+// The location picker the intake offers. DEFAULT_LOCATIONS is the fallback the
+// query falls back to when the user picks nothing; this is the full menu.
+export const INDIA_CITIES = ["Bengaluru", "Mumbai", "Delhi NCR", "Gurgaon", "Noida", "Hyderabad", "Pune", "Chennai", "Kolkata", "Ahmedabad", "Kochi", "Coimbatore", "Remote (India)"];
+
+// Preset experience bands, as [min, max] years. Manual min/max entry overrides.
+export const EXPERIENCE_BANDS = { "0-3y": [0, 3], "3-6y": [3, 6], "6-10y": [6, 10], "10y+": [10, 99] };
+
 // --- Role taxonomy. Data-driven so adding a family is a config edit. ---------
 export const FAMILIES = {
   sales: {
@@ -121,6 +128,56 @@ export const FAMILIES = {
     ],
     weights: { title: 0.45, skills: 0.25, seniority: 0.2, location: 0.1 },
   },
+  /* Development, Consulting and Implementation are adjacent crafts, not new
+     ones: IT services hires "Software Developer" where product companies hire
+     "Software Engineer", and a delivery org splits consulting from rollout.
+     They earn their own families because their sources and title lists differ,
+     and the COMPATIBLE map below stops them culling their neighbours. */
+  development: {
+    label: "Development",
+    lexicon: ["developer", "development", "software development", "programmer", "full stack", "member of technical staff"],
+    titles: ["software developer", "senior software developer", "application developer", "full stack developer", "development engineer", "member of technical staff"],
+    variants: ["mts", "sde", "dev", "programmer analyst"],
+    sources: [
+      { id: "github", label: "GitHub", weight: 5, why: "Public code to verify depth." },
+      { id: "stackoverflow", label: "StackOverflow + dev.to", weight: 4, why: "Problem-solving signal off LinkedIn." },
+      { id: "linkedin", label: "LinkedIn", weight: 2, why: "Cross-check current role." },
+    ],
+    weights: { title: 0.3, skills: 0.4, seniority: 0.2, location: 0.1 },
+  },
+  consulting: {
+    label: "Consulting",
+    lexicon: ["consulting", "advisory", "functional consultant", "technical consultant", "solution consultant", "presales", "engagement manager", "erp", "sap"],
+    titles: ["functional consultant", "technical consultant", "solution consultant", "senior consultant", "principal consultant", "engagement manager"],
+    variants: ["sap consultant", "erp consultant", "presales consultant"],
+    sources: [
+      { id: "linkedin", label: "LinkedIn", weight: 5, why: "Primary graph for consultants." },
+      { id: "serp", label: "Case studies / talks", weight: 3, why: "Public proof of engagements." },
+    ],
+    weights: { title: 0.45, skills: 0.3, seniority: 0.15, location: 0.1 },
+  },
+  implementation: {
+    label: "Implementation",
+    lexicon: ["implementation", "deployment", "onboarding", "professional services", "delivery", "rollout", "migration"],
+    titles: ["implementation consultant", "implementation manager", "implementation specialist", "professional services consultant", "delivery manager", "onboarding specialist", "deployment engineer"],
+    variants: ["ps consultant", "impl consultant", "delivery lead"],
+    sources: [
+      { id: "linkedin", label: "LinkedIn", weight: 5, why: "Primary graph for delivery/PS." },
+      { id: "serp", label: "Product community answers", weight: 3, why: "People who deploy the product publicly." },
+    ],
+    weights: { title: 0.45, skills: 0.3, seniority: 0.15, location: 0.1 },
+  },
+};
+
+/* Adjacent crafts that must NOT cull each other. Without this, adding
+   Development turned every engineering search into a cull of the developers it
+   was looking for (and vice versa) — the veto below sees a different family id
+   and stops reading. Compatibility is declared both ways on purpose. */
+const COMPATIBLE = {
+  engineering: ["development"],
+  development: ["engineering"],
+  consulting: ["implementation"],
+  implementation: ["consulting"],
 };
 
 // --- Sensing -----------------------------------------------------------------
@@ -165,7 +222,9 @@ export function buildSpec({ rawString = "", family, company = "", answers = {}, 
     skills,
     mustHaves,
     seniorities: senioritiesFrom(answers),
-    locations: DEFAULT_LOCATIONS.slice(),
+    // Picked cities win; the defaults are only the "nothing picked" fallback.
+    locations: answers.locations?.length ? [...answers.locations] : DEFAULT_LOCATIONS.slice(),
+    experience: expRange(answers),
     competitors,
     weights: FAMILIES[fam].weights,
   };
@@ -180,6 +239,22 @@ function senioritiesFrom(answers = {}) {
   const map = { Junior: ["entry"], Mid: ["senior"], Senior: ["senior"], "Staff+": ["senior", "director"] };
   if (answers.level && map[answers.level]) return map[answers.level];
   return []; // otherwise let titles carry seniority
+}
+
+// Experience as a {min,max} year range. Manual entry wins over a preset band,
+// and a half-filled manual range is still a range (min alone means "at least").
+// Returns null when the user said nothing — an unstated criterion never judges.
+function expRange(answers = {}) {
+  const has = (v) => v != null && v !== "";
+  if (has(answers.expMin) || has(answers.expMax)) {
+    return { min: has(answers.expMin) ? Number(answers.expMin) || 0 : 0,
+             max: has(answers.expMax) ? Number(answers.expMax) || 0 : 99 };
+  }
+  if (answers.exp && EXPERIENCE_BANDS[answers.exp]) {
+    const [min, max] = EXPERIENCE_BANDS[answers.exp];
+    return { min, max };
+  }
+  return null;
 }
 
 // --- Query: boolean + structured params for the sourcing layer ---------------
@@ -204,6 +279,7 @@ export function buildQuery(spec) {
       titles: spec.titles,
       seniorities: spec.seniorities,
       locations: spec.locations,
+      experience: spec.experience || undefined,
       competitors: spec.company ? comps : [],
     },
     sources: gateSources(spec).map((s) => s.id),
@@ -344,7 +420,9 @@ export function crossFamilyVeto(title, family) {
   const own = scores[family] || 0;
   let bestId = null, bestN = 0;
   for (const [id, n] of Object.entries(scores)) if (n > bestN) { bestId = id; bestN = n; }
-  return bestN > 0 && bestId !== family && bestN > own;
+  if (!bestN || bestId === family || bestN <= own) return false;
+  // A Software Developer is not the wrong answer to a Software Engineer search.
+  return !(COMPATIBLE[family] || []).includes(bestId);
 }
 
 // --- Deterministic prefilter: the free relevance gate ------------------------
@@ -399,7 +477,16 @@ export function prefilter(profile, spec, threshold = 0.35) {
     if (locScore === 1) reasons.push("in-region");
   }
 
-  const prescore = +(titleScore * w.title + skillScore * w.skills + senScore * w.seniority + locScore * w.location).toFixed(3);
+  let prescore = +(titleScore * w.title + skillScore * w.skills + senScore * w.seniority + locScore * w.location).toFixed(3);
+
+  /* Experience: a stated range demotes rather than culls. Years are the least
+     reliable field a scrape returns — often absent, often a guess — so an
+     outlier drops down the list instead of vanishing off it. */
+  const yrs = Number(profile.experienceYears);
+  if (spec.experience && profile.experienceYears != null && !Number.isNaN(yrs)) {
+    if (yrs >= spec.experience.min && yrs <= spec.experience.max) reasons.push("exp fit");
+    else { prescore = +(prescore * 0.6).toFixed(3); reasons.push(`outside ${spec.experience.min}-${spec.experience.max}y`); }
+  }
   // Relevance gate: location + seniority defaults alone must never keep a
   // profile. Require a real title or skill hit, or it's out whatever the score.
   const skillHit = wanted.length > 0 && wanted.some((k) => hay.includes(k));

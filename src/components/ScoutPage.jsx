@@ -13,8 +13,10 @@ import { summarizeLeads } from "../lib/summarizeLeads.js";
 import { scoreBatch } from "../lib/scoreProfile.js";
 import { revealContact } from "../lib/contactReveal.js";
 import { getCompetitorModel } from "../lib/competitorModel.js";
+import { findCandidateDocs } from "../lib/docFinder.js";
 import IntakePanel from "./IntakePanel.jsx";
 import CandidateCard from "./CandidateCard.jsx";
+import DocPreview from "./DocPreview.jsx";
 import LeadCard from "./LeadCard.jsx";
 import CompanyMap from "./CompanyMap.jsx";
 import SourceStatus from "./SourceStatus.jsx";
@@ -53,6 +55,7 @@ const toCardProfile = (p) => ({
   url: p.profile_url,
   match: p.match,
   sources: [{ id: p.source, label: SOURCE_LABEL[p.source] || p.source, url: p.profile_url, stars: p.stars }],
+  docs: p.docs,
   _raw: p,
 });
 
@@ -107,6 +110,7 @@ export default function ScoutPage() {
   const [sensing, setSensing] = useState(false);
   const [derived, setDerived] = useState(null);
   const [leads, setLeads] = useState([]);
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   const intakeRef = useRef(null);
   const resultsRef = useRef(null);
@@ -304,6 +308,19 @@ export default function ScoutPage() {
     }
   }, [spec, raw, derived]);
 
+  /* Public documents, found per candidate on click. The card asks, we search,
+     and the result is written back onto that one profile so the chips (and the
+     preview) light up without re-running the whole search. */
+  const findDocs = useCallback(async (cardProfile) => {
+    const raw = cardProfile._raw || cardProfile;
+    const docs = await findCandidateDocs(raw.name, { org: cardProfile.org, role: cardProfile.title });
+    if (docs.length) {
+      setResults((prev) => prev.map((r) => (keyOf(r) === keyOf(raw) ? { ...r, docs } : r)));
+      setSaved((prev) => prev.map((r) => (keyOf(r) === keyOf(raw) ? { ...r, docs } : r)));
+    }
+    return docs;
+  }, []);
+
   const toggleSave = (profile) => {
     const p = profile._raw || profile;
     setSaved((prev) => (prev.some((x) => keyOf(x) === keyOf(p)) ? prev.filter((x) => keyOf(x) !== keyOf(p)) : [...prev, p]));
@@ -414,6 +431,8 @@ export default function ScoutPage() {
                   onOpen={(_p, url) => url && window.open(url, "_blank", "noopener,noreferrer")}
                   onSave={toggleSave}
                   onRevealEmail={(cp) => revealContact(cp._raw)}
+                  onFindDocs={findDocs}
+                  onPreviewDoc={setPreviewDoc}
                 />
               ))}
             </div>
@@ -440,6 +459,9 @@ export default function ScoutPage() {
         skills={spec?.skills || []}
         location={spec?.locations?.[0] || "India"}
       />
+
+      {/* Document preview — mounted once, driven by whichever chip was clicked */}
+      <DocPreview doc={previewDoc} onClose={() => setPreviewDoc(null)} />
     </>
   );
 }
