@@ -1,4 +1,5 @@
 import { useState } from "react";
+import CandidateIntel from "./CandidateIntel.jsx";
 
 // CandidateCard — themed to scout-theme.css (matches the one-page mockup).
 // profile = { name, title, org, location, avatarUrl?, url?, linkedinUrn?,
@@ -10,12 +11,13 @@ const TIER_CLASS = { Strong: "strong", Good: "good", Maybe: "maybe", Weak: "weak
 const DOC_BG = { pdf: "#B3261E", doc: "#1A56DB", ppt: "#C2410C" };
 const DOC_LTR = { pdf: "PDF", doc: "DOC", ppt: "PPT" };
 
-export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onSave, onFindDocs, onPreviewDoc, saved = false }) {
+export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onSave, onFindDocs, onPreviewDoc, requiredSkills = [], saved = false }) {
   const [revealing, setRevealing] = useState(false);
   const [contact, setContact] = useState(null);
   const [revealError, setRevealError] = useState("");
   const [finding, setFinding] = useState(false);
   const [docError, setDocError] = useState("");
+  const [showIntel, setShowIntel] = useState(false);
 
   const m = profile.match || {};
   const url = profile.url || (profile.linkedinUrn ? `https://www.linkedin.com/in/${profile.linkedinUrn}` : null);
@@ -40,7 +42,7 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
     setFinding(true); setDocError("");
     try {
       const found = await onFindDocs(profile);
-      if (!found?.length) setDocError("No public CV or portfolio found.");
+      if (!found?.length) setDocError("No document found that is verifiably theirs.");
     } catch (e) {
       setDocError(e.message || String(e));
     } finally {
@@ -88,9 +90,11 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
       {profile.docs?.length ? (
         <div className="srcs">
           {profile.docs.map((d, i) => (
-            <button key={i} className="s doc" onClick={() => onPreviewDoc?.(d)} title={d.title || d.url}>
+            <button key={i} className={"s doc " + (d.label || "")} onClick={() => onPreviewDoc?.(d)}
+              title={[d.title || d.url, d.why?.length ? `Matched because: ${d.why.join(", ")}` : ""].filter(Boolean).join("\n")}>
               <span className="b" style={{ background: DOC_BG[d.type] || "#1e1e1e" }}>{DOC_LTR[d.type] || "DOC"}</span>
               {d.title && d.title.length > 22 ? d.title.slice(0, 22) + "\u2026" : (d.title || (d.type || "doc").toUpperCase())}
+              {d.label && <span className="conf">{d.label}</span>}
             </button>
           ))}
         </div>
@@ -122,11 +126,17 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
         </div>
       )}
 
+      {showIntel && (
+        <CandidateIntel username={profile.username} skills={requiredSkills} onClose={() => setShowIntel(false)} />
+      )}
+
       <div className="cta">
         <button className="g pri" onClick={() => onOpen?.(profile, url)} disabled={!url}>Open profile</button>
         <button className="g" onClick={reveal} disabled={revealing || !!contact}>
           {revealing ? "Revealing…" : contact ? "Revealed" : "Email + social"}
         </button>
+        <button className={"g" + (showIntel ? " on" : "")} onClick={() => setShowIntel((v) => !v)}
+          aria-expanded={showIntel}>Intel</button>
         {onFindDocs && !profile.docs?.length && (
           <button className="g" onClick={findDocs} disabled={finding}>{finding ? "Looking…" : "Find CV"}</button>
         )}

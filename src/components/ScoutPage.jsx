@@ -17,6 +17,7 @@ import { findCandidateDocs } from "../lib/docFinder.js";
 import IntakePanel from "./IntakePanel.jsx";
 import CandidateCard from "./CandidateCard.jsx";
 import DocPreview from "./DocPreview.jsx";
+import InsightRail from "./InsightRail.jsx";
 import LeadCard from "./LeadCard.jsx";
 import CompanyMap from "./CompanyMap.jsx";
 import SourceStatus from "./SourceStatus.jsx";
@@ -56,6 +57,7 @@ const toCardProfile = (p) => ({
   match: p.match,
   sources: [{ id: p.source, label: SOURCE_LABEL[p.source] || p.source, url: p.profile_url, stars: p.stars }],
   docs: p.docs,
+  username: p.username || "",
   _raw: p,
 });
 
@@ -431,6 +433,7 @@ export default function ScoutPage() {
                   onOpen={(_p, url) => url && window.open(url, "_blank", "noopener,noreferrer")}
                   onSave={toggleSave}
                   onRevealEmail={(cp) => revealContact(cp._raw)}
+                  requiredSkills={(spec?.skills || []).slice(0, 8)}
                   onFindDocs={findDocs}
                   onPreviewDoc={setPreviewDoc}
                 />
@@ -462,6 +465,10 @@ export default function ScoutPage() {
 
       {/* Document preview — mounted once, driven by whichever chip was clicked */}
       <DocPreview doc={previewDoc} onClose={() => setPreviewDoc(null)} />
+
+      {/* Reads the JD back: what each term means and how to screen for it.
+          Hides itself when the text carries nothing it recognises. */}
+      <InsightRail text={`${raw} ${derived?.must_have?.join(" ") || ""}`} role={derived?.role_title || spec?.titles?.[0] || ""} family={family} />
     </>
   );
 }
