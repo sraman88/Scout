@@ -17,6 +17,7 @@ import { findCandidateDocs } from "../lib/docFinder.js";
 import IntakePanel from "./IntakePanel.jsx";
 import CandidateCard from "./CandidateCard.jsx";
 import DocPreview from "./DocPreview.jsx";
+import InsightRail from "./InsightRail.jsx";
 import LeadCard from "./LeadCard.jsx";
 import CompanyMap from "./CompanyMap.jsx";
 import SourceStatus from "./SourceStatus.jsx";
@@ -462,6 +463,10 @@ export default function ScoutPage() {
 
       {/* Document preview — mounted once, driven by whichever chip was clicked */}
       <DocPreview doc={previewDoc} onClose={() => setPreviewDoc(null)} />
+
+      {/* Reads the JD back: what each term means and how to screen for it.
+          Hides itself when the text carries nothing it recognises. */}
+      <InsightRail text={`${raw} ${derived?.must_have?.join(" ") || ""}`} role={derived?.role_title || spec?.titles?.[0] || ""} family={family} />
     </>
   );
 }

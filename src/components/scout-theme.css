@@ -364,3 +364,30 @@
   .spinner{width:26px;height:26px;border:2.5px solid var(--rule);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto}
   @keyframes spin{to{transform:rotate(360deg)}}
   .loading-label{margin-top:12px;text-align:center;font-size:12.5px;color:var(--ink-muted)}
+
+  /* ===========================================================================
+     Insight rail — what the JD is actually asking for, and how to screen for it
+     ======================================================================== */
+  .rail-tab{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:90;display:flex;align-items:center;gap:8px;font-family:inherit;font-size:12.5px;font-weight:650;padding:12px 14px 12px 12px;border:1px solid var(--rule);border-right:none;border-radius:10px 0 0 10px;background:var(--card);color:var(--ink);cursor:pointer;box-shadow:-2px 0 12px rgba(16,24,40,.08);writing-mode:vertical-rl}
+  .rail-tab:hover{border-color:var(--accent);color:var(--accent-ink)}
+  .rail-tab-n{writing-mode:horizontal-tb;font-size:11px;font-weight:800;min-width:20px;height:20px;display:grid;place-items:center;border-radius:999px;background:var(--accent);color:#fff}
+  .rail-tab-l{writing-mode:vertical-rl}
+  @media (max-width:640px){ .rail-tab{writing-mode:horizontal-tb;top:auto;bottom:16px;right:16px;transform:none;border-radius:10px;border-right:1px solid var(--rule)} .rail-tab-l{writing-mode:horizontal-tb} }
+
+  .rail{position:fixed;top:0;right:0;bottom:0;width:min(460px,100vw);background:var(--card);z-index:201;display:flex;flex-direction:column;box-shadow:-16px 0 48px rgba(16,24,40,.18);animation:sheet-in .22s cubic-bezier(.32,.72,0,1)}
+  .rail-terms{display:flex;flex-wrap:wrap;gap:6px;padding:14px 24px;border-bottom:1px solid var(--rule);background:var(--page)}
+
+  .insight{padding:20px 0 4px}
+  .insight h3{margin:0 0 10px;font-size:16px;font-weight:700;letter-spacing:-.01em;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .insight h4{margin:18px 0 5px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted)}
+  .insight p{margin:0;font-size:13.5px;line-height:1.65;color:var(--ink-soft)}
+  .insight p.what{font-size:14.5px;line-height:1.6;color:var(--ink)}
+  .screenlist{margin:0;padding-left:18px}
+  .screenlist li{font-size:13.5px;line-height:1.6;color:var(--ink-soft);margin-bottom:8px}
+  .insight .related{margin-top:16px;font-size:12px;color:var(--ink-muted)}
+
+  .rail-ask{margin-top:22px;padding-top:18px;border-top:1px solid var(--rule)}
+  .rail-ask label{display:block;font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:6px}
+  .rail-ask-row{display:flex;gap:8px}
+  .rail-ask-row input{flex:1;font-family:inherit;font-size:13.5px;padding:9px 11px;border:1px solid var(--rule);border-radius:8px;color:var(--ink);background:var(--card)}
+  .rail-ask .err{margin:8px 0 0;font-size:12px;color:var(--danger);font-weight:600}
