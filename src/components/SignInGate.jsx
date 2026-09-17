@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { T } from "../theme.js";
-import { Card, PrimaryBtn, LoadingPulse, ErrBox } from "./ui.jsx";
 import { isConfigured } from "../lib/firebase.js";
 import { signInWithGoogle, signOutUser, subscribeAuth, loadSettingsDoc, saveSettingsField } from "../lib/cloudAuth.js";
 import { hydrateCache, resetCache, setPersistHandler } from "../lib/storage.js";
@@ -37,37 +35,34 @@ export function SignInGate({ children }) {
 
   if (!isConfigured) {
     return (
-      <FullScreen>
-        <Card title="FIREBASE NOT CONFIGURED" accent={T.red}>
-          <div style={{ color: T.text2, fontSize: 13, lineHeight: 1.6 }}>
-            Scout needs a Firebase project for Google sign-in and per-account key storage. Add the <code>VITE_FIREBASE_*</code> values from your Firebase project's Web App config to <code>.env.local</code> (see <code>.env.example</code>) and restart the dev server.
-          </div>
-        </Card>
-      </FullScreen>
+      <Screen>
+        <h1>Firebase isn't configured</h1>
+        <p>
+          Scout needs a Firebase project for Google sign-in and per-account key storage. Add the{" "}
+          <code>VITE_FIREBASE_*</code> values from your project's Web App config to <code>.env.local</code>{" "}
+          (see <code>.env.example</code>) and restart the dev server.
+        </p>
+      </Screen>
     );
   }
 
-  if (user === undefined) {
-    return <FullScreen><LoadingPulse /></FullScreen>;
-  }
+  if (user === undefined) return <Screen busy label="Checking your session…" />;
 
   if (!user) {
     return (
-      <FullScreen>
-        <Card title="SIGN IN TO SCOUT" accent={T.cyan}>
-          <div style={{ color: T.text2, fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
-            Sign in with Google to use Scout. Your API keys (Groq, Gemini, GitHub, Apify) are saved to your account and follow you across browsers and devices — nobody else's keys are shared with you, and yours aren't shared with anyone else.
-          </div>
-          <PrimaryBtn onClick={handleSignIn}>→ SIGN IN WITH GOOGLE</PrimaryBtn>
-          {authError && <ErrBox>{authError}</ErrBox>}
-        </Card>
-      </FullScreen>
+      <Screen>
+        <h1>Sign in to Scout</h1>
+        <p>
+          Your API keys are saved to your own Google account and follow you across browsers and devices.
+          Nobody else's keys are shared with you, and yours aren't shared with anyone.
+        </p>
+        <button className="btn-pri" style={{ width: "100%" }} onClick={handleSignIn}>Sign in with Google</button>
+        {authError && <div className="errbox" role="alert">{authError}</div>}
+      </Screen>
     );
   }
 
-  if (!hydrated) {
-    return <FullScreen><LoadingPulse /></FullScreen>;
-  }
+  if (!hydrated) return <Screen busy label="Loading your settings…" />;
 
   return (
     <AuthContext.Provider value={{ user, signOut: signOutUser }}>
@@ -76,10 +71,20 @@ export function SignInGate({ children }) {
   );
 }
 
-function FullScreen({ children }) {
+/* One centred card, used by every pre-app state: missing config, checking the
+   session, signed out, hydrating. */
+function Screen({ children, busy, label }) {
   return (
-    <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: T.body, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ maxWidth: 480, width: "100%" }}>{children}</div>
+    <div className="screen">
+      <div className="screen-card">
+        <div className="brandmark">S<span>C</span>OUT</div>
+        {busy ? (
+          <>
+            <div className="spinner" role="status" aria-label={label || "Loading"} />
+            <div className="loading-label">{label}</div>
+          </>
+        ) : children}
+      </div>
     </div>
   );
 }

@@ -264,3 +264,103 @@
   .expman{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12.5px;color:var(--ink-soft)}
   .expman input{width:74px;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--rule);border-radius:8px;color:var(--ink);background:#fff}
   .compline{font-size:11.5px;color:var(--match);margin-top:6px}
+
+  /* document confidence — a chip asserts less when the evidence is thinner */
+  .s.doc .conf{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:1px 5px;border-radius:999px;margin-left:2px}
+  .s.doc.strong .conf{background:var(--match-wash);color:var(--match)}
+  .s.doc.likely .conf{background:var(--accent-wash);color:var(--accent-ink)}
+  .s.doc.possible .conf{background:#F3F4F6;color:var(--ink-soft)}
+
+  /* ===========================================================================
+     Accessibility foundations
+     ---------------------------------------------------------------------------
+     These are global on purpose. The app had no visible focus state at all, so
+     a keyboard user could not tell where they were; `:focus-visible` shows a
+     ring for keyboard navigation without putting one on every mouse click.
+     ======================================================================== */
+  :root{
+    /* --ink-faint fails AA on white (~2.9:1) so it is for rules and decoration
+       only. Helper TEXT uses --ink-muted, which passes at ~5:1. */
+    --ink-muted:#6B7280;
+    --focus:0 0 0 2px var(--card), 0 0 0 4px var(--accent);
+    --danger:#B3261E; --danger-wash:#FDECEA;
+  }
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible{
+    outline:none; box-shadow:var(--focus); border-radius:6px;
+  }
+  /* Respect a stated preference for less movement — the spinners and slide-in
+     transitions below are decorative, never load-bearing. */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  }
+  .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+  /* ===========================================================================
+     Slide-over panel (Settings) — a right-hand sheet, Stripe-style: grouped
+     sections, one column, a sticky action bar that never scrolls away.
+     ======================================================================== */
+  .sheet-scrim{position:fixed;inset:0;background:rgba(17,24,39,.45);z-index:200;animation:sheet-fade .16s ease-out}
+  .sheet{position:fixed;top:0;right:0;bottom:0;width:min(520px,100vw);background:var(--card);z-index:201;display:flex;flex-direction:column;box-shadow:-16px 0 48px rgba(16,24,40,.18);animation:sheet-in .22s cubic-bezier(.32,.72,0,1)}
+  @keyframes sheet-in{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+  @keyframes sheet-fade{from{opacity:0}to{opacity:1}}
+  .sheet-head{display:flex;align-items:flex-start;gap:12px;padding:20px 24px 16px;border-bottom:1px solid var(--rule)}
+  .sheet-head h2{margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .sheet-head p{margin:4px 0 0;font-size:12.5px;color:var(--ink-muted);line-height:1.5}
+  .sheet-x{margin-left:auto;flex:0 0 auto;font-family:inherit;font-size:20px;line-height:1;width:32px;height:32px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink-muted);cursor:pointer}
+  .sheet-x:hover{background:var(--page);color:var(--ink)}
+  .sheet-body{flex:1;overflow-y:auto;padding:4px 24px 24px}
+  .sheet-foot{display:flex;align-items:center;gap:10px;padding:14px 24px;border-top:1px solid var(--rule);background:var(--card)}
+  .sheet-foot .spacer{flex:1}
+  .sheet-dirty{font-size:12px;color:var(--warn)}
+
+  /* section grouping */
+  .fsec{padding:20px 0;border-bottom:1px solid var(--rule)}
+  .fsec:last-child{border-bottom:none}
+  .fsec > h3{margin:0 0 2px;font-size:13.5px;font-weight:700;color:var(--ink);letter-spacing:-.01em}
+  .fsec > .note{margin:0 0 14px;font-size:12px;color:var(--ink-muted);line-height:1.55}
+  .fsec > .note a{color:var(--accent-ink);text-decoration:underline;text-underline-offset:2px}
+
+  /* form rows */
+  .frow{margin-bottom:14px}
+  .frow:last-child{margin-bottom:0}
+  .frow label{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:5px}
+  .frow input, .frow select{width:100%;font-family:inherit;font-size:13.5px;padding:9px 11px;border:1px solid var(--rule);border-radius:8px;color:var(--ink);background:var(--card)}
+  .frow input::placeholder{color:var(--ink-faint)}
+  .frow input:hover, .frow select:hover{border-color:#CBD5E1}
+  .hint{margin:5px 0 0;font-size:11.5px;color:var(--ink-muted);line-height:1.5}
+  .hint a{color:var(--accent-ink)}
+  .frow.bad input{border-color:var(--danger)}
+  .frow .err{margin:5px 0 0;font-size:11.5px;color:var(--danger);font-weight:600}
+
+  /* a small state pill next to a field label */
+  .pill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:999px;background:#F3F4F6;color:var(--ink-muted)}
+  .pill.on{background:var(--match-wash);color:var(--match)}
+  .pill.req{background:var(--accent-wash);color:var(--accent-ink)}
+
+  /* segmented control (provider picker) */
+  .seg{display:flex;gap:0;border:1px solid var(--rule);border-radius:9px;overflow:hidden;background:var(--page)}
+  .seg button{flex:1;font-family:inherit;font-size:12.5px;font-weight:600;padding:9px 10px;border:none;background:transparent;color:var(--ink-soft);cursor:pointer}
+  .seg button + button{border-left:1px solid var(--rule)}
+  .seg button[aria-pressed="true"]{background:var(--card);color:var(--accent-ink);box-shadow:inset 0 -2px 0 var(--accent)}
+
+  /* buttons shared by the sheet and the auth screens */
+  .btn-pri{font-family:inherit;font-size:13px;font-weight:650;padding:10px 18px;border-radius:9px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+  .btn-pri:hover:not(:disabled){background:var(--accent-ink);border-color:var(--accent-ink)}
+  .btn-pri:disabled{opacity:.55;cursor:not-allowed}
+  .btn-ghost{font-family:inherit;font-size:13px;font-weight:600;padding:10px 16px;border-radius:9px;border:1px solid var(--rule);background:var(--card);color:var(--ink-soft);cursor:pointer}
+  .btn-ghost:hover{border-color:#CBD5E1;color:var(--ink)}
+  .btn-danger{font-family:inherit;font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:9px;border:1px solid #F3C7C3;background:var(--card);color:var(--danger);cursor:pointer}
+  .btn-danger:hover{background:var(--danger-wash)}
+
+  /* centred single-card screens: sign-in, Firebase-missing, crash */
+  .screen{min-height:100svh;display:grid;place-items:center;padding:24px;background:var(--page)}
+  .screen-card{width:100%;max-width:440px;background:var(--card);border:1px solid var(--rule);border-radius:var(--r);padding:28px;box-shadow:0 1px 3px rgba(16,24,40,.06),0 12px 32px rgba(16,24,40,.06)}
+  .screen-card .brandmark{font-weight:800;font-size:20px;letter-spacing:-.02em;margin-bottom:18px}
+  .screen-card .brandmark span{color:var(--accent)}
+  .screen-card h1{margin:0 0 8px;font-size:18px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .screen-card p{margin:0 0 18px;font-size:13.5px;line-height:1.6;color:var(--ink-soft)}
+  .screen-card code{font-size:12.5px;background:var(--page);border:1px solid var(--rule);border-radius:5px;padding:1px 5px}
+  .errbox{margin-top:14px;padding:11px 13px;border-radius:9px;background:var(--danger-wash);border:1px solid #F3C7C3;color:var(--danger);font-size:12.5px;line-height:1.5}
+  .spinner{width:26px;height:26px;border:2.5px solid var(--rule);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading-label{margin-top:12px;text-align:center;font-size:12.5px;color:var(--ink-muted)}

@@ -24,7 +24,8 @@ export default function App() {
           <span className="tag">Sourcing intelligence · one screen</span>
           {/* Which build is actually live — checkable without opening devtools. */}
           <span className="build" title={`Build ${__BUILD_ID__} · ${__BUILD_TIME__} UTC`}>{__BUILD_ID__}</span>
-          <button className="iconbtn" onClick={() => setShowSettings(true)} title="API keys & settings">⚙ Settings</button>
+          <button className="iconbtn" onClick={() => setShowSettings(true)}
+            aria-haspopup="dialog" aria-expanded={showSettings}>⚙ Settings</button>
         </div>
       </div>
 
