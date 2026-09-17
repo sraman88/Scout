@@ -57,6 +57,7 @@ const toCardProfile = (p) => ({
   match: p.match,
   sources: [{ id: p.source, label: SOURCE_LABEL[p.source] || p.source, url: p.profile_url, stars: p.stars }],
   docs: p.docs,
+  username: p.username || "",
   _raw: p,
 });
 
@@ -432,6 +433,7 @@ export default function ScoutPage() {
                   onOpen={(_p, url) => url && window.open(url, "_blank", "noopener,noreferrer")}
                   onSave={toggleSave}
                   onRevealEmail={(cp) => revealContact(cp._raw)}
+                  requiredSkills={(spec?.skills || []).slice(0, 8)}
                   onFindDocs={findDocs}
                   onPreviewDoc={setPreviewDoc}
                 />
