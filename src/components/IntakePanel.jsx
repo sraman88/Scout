@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { buildSpec, buildQuery, gateSources, resolveCompetitors, FAMILIES } from "../lib/relevanceEngine.js";
+import { buildSpec, buildQuery, gateSources, resolveCompetitors, FAMILIES, INDIA_CITIES, EXPERIENCE_BANDS } from "../lib/relevanceEngine.js";
 
 // IntakePanel — themed to scout-theme.css. Receives the sensed `family` from the
 // page (which does the search/sensing) and produces the canonical spec.
@@ -42,18 +42,46 @@ const QUESTIONS = {
     { id: "vertical", label: "Industry", type: "multi", opts: ["Product / SaaS", "BFSI", "Manufacturing", "Consulting"] },
     { id: "signals", label: "Must-have signals", type: "multi", opts: ["CA / CPA", "Listed-company reporting", "ERP migration"] },
   ],
+  development: [
+    { id: "level", label: "Level", type: "single", opts: ["Junior", "Mid", "Senior", "Staff+"] },
+    { id: "stack", label: "Primary stack", type: "multi", opts: ["Java", "C#", ".NET", "Python", "Go", "Node"] },
+    { id: "domain", label: "Build type", type: "multi", opts: ["Product", "Services", "Platform", "Mobile"] },
+  ],
+  consulting: [
+    { id: "level", label: "Level", type: "single", opts: ["Junior", "Mid", "Senior", "Staff+"] },
+    { id: "domain", label: "Practice", type: "multi", opts: ["ERP", "CRM", "Cloud", "Data", "Security"] },
+    { id: "vertical", label: "Industry", type: "multi", opts: ["IT services", "Product / SaaS", "BFSI", "Manufacturing"] },
+    { id: "signals", label: "Must-have signals", type: "multi", opts: ["Client-facing", "Presales", "Certified"] },
+  ],
+  implementation: [
+    { id: "level", label: "Level", type: "single", opts: ["Junior", "Mid", "Senior", "Staff+"] },
+    { id: "domain", label: "Product area", type: "multi", opts: ["Migration", "Onboarding", "Integrations", "Rollout"] },
+    { id: "vertical", label: "Industry", type: "multi", opts: ["Product / SaaS", "IT services", "BFSI", "Healthcare"] },
+    { id: "signals", label: "Must-have signals", type: "multi", opts: ["Enterprise rollouts", "Customer-facing", "Project ownership"] },
+  ],
 };
-const fallbackQs = [{ id: "exp", label: "Experience", type: "single", opts: ["0–3y", "3–6y", "6–10y", "10y+"] }];
+const EXP_BANDS = Object.keys(EXPERIENCE_BANDS);
+
+// "a Sales role", but "an Implementation role" — Engineering, Implementation
+// and HR all read wrong under a hardcoded "a".
+const article = (label) => (/^[AEIOU]/i.test(label) ? "an" : "a") + " " + label;
 
 export default function IntakePanel({ family = "sales", rawString = "", callModel, onSpec, onRun, onFamilyChange, busy = false, sensing = false, derived = null }) {
   const [answers, setAnswers] = useState({});
   const [company, setCompany] = useState("");
   const [competitors, setCompetitors] = useState([]);
-  const qs = QUESTIONS[family] || fallbackQs;
+  const [manualExp, setManualExp] = useState(false);
+  const qs = QUESTIONS[family] || [];
+
+  const setA = (patch) => setAnswers((a) => ({ ...a, ...patch }));
 
   const toggle = (q, o) => setAnswers((a) => {
     if (q.type === "multi") { const arr = a[q.id] || []; return { ...a, [q.id]: arr.includes(o) ? arr.filter((x) => x !== o) : [...arr, o] }; }
     return { ...a, [q.id]: a[q.id] === o ? undefined : o };
+  });
+  const toggleLoc = (c) => setAnswers((a) => {
+    const arr = a.locations || [];
+    return { ...a, locations: arr.includes(c) ? arr.filter((x) => x !== c) : [...arr, c] };
   });
 
   const findCompetitors = useCallback(async () => {
@@ -78,7 +106,7 @@ export default function IntakePanel({ family = "sales", rawString = "", callMode
       <div className="sensedrow">
         <div className="sensed">
           <span className="d" />
-          {sensing ? "Reading the role…" : `Sensed a ${FAMILIES[family]?.label || "Sales"} role`}
+          {sensing ? "Reading the role…" : `Sensed ${article(FAMILIES[family]?.label || "Sales")} role`}
           {derived?.role_title && !sensing ? <em>· {derived.role_title}</em> : null}
         </div>
         <label className="famswap">
@@ -101,12 +129,44 @@ export default function IntakePanel({ family = "sales", rawString = "", callMode
             </div>
           </div>
         ))}
+
+        {/* Experience — a preset band, or an exact range when the band is wrong. */}
+        <div className="q">
+          <div className="lab">Experience <span className="pk">years</span></div>
+          <div className="chips">
+            {EXP_BANDS.map((b) => (
+              <button key={b} className={"chip" + (!manualExp && answers.exp === b ? " on" : "")}
+                onClick={() => { setManualExp(false); setA({ exp: answers.exp === b ? undefined : b, expMin: undefined, expMax: undefined }); }}>{b}</button>
+            ))}
+            <button className={"chip" + (manualExp ? " on" : "")}
+              onClick={() => { setManualExp(!manualExp); setA({ exp: undefined }); }}>Manual</button>
+          </div>
+          {manualExp && (
+            <div className="expman">
+              <input type="number" min="0" placeholder="min" value={answers.expMin ?? ""} onChange={(e) => setA({ expMin: e.target.value })} />
+              <span>to</span>
+              <input type="number" min="0" placeholder="max" value={answers.expMax ?? ""} onChange={(e) => setA({ expMax: e.target.value })} />
+              <span>years</span>
+            </div>
+          )}
+        </div>
+
+        {/* Location — pick cities, or leave empty for the all-India default. */}
+        <div className="q">
+          <div className="lab">Location <span className="pk">India · select any</span></div>
+          <div className="chips">
+            {INDIA_CITIES.map((c) => (
+              <button key={c} className={"chip" + ((answers.locations || []).includes(c) ? " on" : "")} onClick={() => toggleLoc(c)}>{c}</button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="intake-foot">
         <div className="cfield">
           <input placeholder="Hiring for… e.g. Salesforce (unlocks competitor sourcing)"
             value={company} onChange={(e) => setCompany(e.target.value)} onBlur={findCompetitors} />
+          {competitors.length > 0 && <div className="compline">Sourcing from: {competitors.join(", ")}</div>}
         </div>
         <button className="btn" disabled={busy} onClick={() => onRun?.(spec, buildQuery(spec), gateSources(spec))}>
           {busy ? "Searching…" : "Run search"}
