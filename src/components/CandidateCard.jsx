@@ -40,7 +40,7 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
     setFinding(true); setDocError("");
     try {
       const found = await onFindDocs(profile);
-      if (!found?.length) setDocError("No public CV or portfolio found.");
+      if (!found?.length) setDocError("No document found that is verifiably theirs.");
     } catch (e) {
       setDocError(e.message || String(e));
     } finally {
@@ -88,9 +88,11 @@ export default function CandidateCard({ profile = {}, onOpen, onRevealEmail, onS
       {profile.docs?.length ? (
         <div className="srcs">
           {profile.docs.map((d, i) => (
-            <button key={i} className="s doc" onClick={() => onPreviewDoc?.(d)} title={d.title || d.url}>
+            <button key={i} className={"s doc " + (d.label || "")} onClick={() => onPreviewDoc?.(d)}
+              title={[d.title || d.url, d.why?.length ? `Matched because: ${d.why.join(", ")}` : ""].filter(Boolean).join("\n")}>
               <span className="b" style={{ background: DOC_BG[d.type] || "#1e1e1e" }}>{DOC_LTR[d.type] || "DOC"}</span>
               {d.title && d.title.length > 22 ? d.title.slice(0, 22) + "\u2026" : (d.title || (d.type || "doc").toUpperCase())}
+              {d.label && <span className="conf">{d.label}</span>}
             </button>
           ))}
         </div>
