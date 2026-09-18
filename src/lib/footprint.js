@@ -23,7 +23,7 @@
 import { proxyFetch } from "./proxyFetch.js";
 import { ghHeaders } from "./github.js";
 import { getStoredKey } from "./storage.js";
-import { RELAY_OPT_IN } from "./serp.js";
+import { relayAllowed } from "./serp.js";
 
 /* kind: code | writing | community | data | design
    direct:true  -> the endpoint sends CORS headers, so fetch() works from the
@@ -153,10 +153,10 @@ export async function findFootprint(username, { only = null, onResult, read = ge
      relay operator learns that someone is looking up this person. That is a
      lookup of a named individual, so it is opt-in — the direct sites, which are
      the majority, still run either way. */
-  const relayAllowed = read(RELAY_OPT_IN) === "1";
+  const mayRelay = relayAllowed(read);
 
   return Promise.all(sites.map(async (site) => {
-    if (!site.direct && !relayAllowed) {
+    if (!site.direct && !mayRelay) {
       const row = { id: site.id, label: site.label, kind: site.kind, profile: site.profile(u), found: false, skipped: "needs the public relay" };
       onResult?.(row);
       return row;

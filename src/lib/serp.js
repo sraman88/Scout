@@ -83,7 +83,11 @@ export function unwrapDdg(href) {
   try {
     const u = new URL(href);
     const real = u.searchParams.get("uddg");
-    return real ? decodeURIComponent(real) : href;
+    const out = real ? decodeURIComponent(real) : href;
+    /* The unwrapped target comes from a scraped page, and generalising this
+       away from the old LinkedIn-only filter dropped its implicit scheme check.
+       Results become hrefs, so only http(s) may pass. */
+    return /^https?:\/\//i.test(out) ? out : "";
   } catch { return ""; }
 }
 
@@ -132,12 +136,17 @@ async function apifySearch(query, { count = 15 } = {}) {
    skip the relays unless the user has explicitly opted in. */
 export const RELAY_OPT_IN = "allow_public_relay";
 
+/* True when the user has accepted that the relay operators see the query.
+   Any lookup keyed on a PERSON — their name, handle or profile — must consult
+   this before reaching for proxyFetch. */
+export const relayAllowed = (read = getStoredKey) => read(RELAY_OPT_IN) === "1";
+
 export function availableBackends(read = getStoredKey, { sensitive = false } = {}) {
   const out = [];
   if (read("brave_key")) out.push({ id: "brave", label: "Brave Search API" });
   if (read("searxng_url")) out.push({ id: "searxng", label: "SearXNG" });
   // Direct, contracted or self-hosted backends above; public relays below.
-  if (!sensitive || read(RELAY_OPT_IN) === "1") out.push({ id: "keyless", label: "DuckDuckGo + Mojeek" });
+  if (!sensitive || relayAllowed(read)) out.push({ id: "keyless", label: "DuckDuckGo + Mojeek" });
   if (read("apify")) out.push({ id: "apify", label: "Apify Google actor" });
   return out;
 }

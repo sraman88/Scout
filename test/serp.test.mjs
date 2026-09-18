@@ -97,6 +97,10 @@ Talent acquisition lead.`;
   check("tags the engine", rows.every((r) => r.via === "ddg"));
   check("unwrapDdg passes a plain url through", unwrapDdg("https://x.com/a") === "https://x.com/a");
   check("unwrapDdg survives junk", unwrapDdg("not a url") === "");
+  /* These become hrefs. Generalising away from the old LinkedIn-only filter
+     dropped an implicit scheme check, so the scheme is pinned explicitly. */
+  check("unwrapDdg refuses a non-http scheme", unwrapDdg("https://duckduckgo.com/l/?uddg=javascript%3Aalert(1)") === "");
+  check("unwrapDdg refuses a data url", unwrapDdg("https://duckduckgo.com/l/?uddg=data%3Atext%2Fhtml%2Chi") === "");
 
   const mojeek = `Results
 [Asha Rao - Freshworks | LinkedIn](https://in.linkedin.com/in/asharao)
@@ -119,6 +123,19 @@ Talent acquisition lead.`;
 
   const bothDead = await keylessSearch("q", { fetchText: async () => { throw new Error("proxy down"); } });
   check("both engines dead returns empty rather than throwing", bothDead.length === 0);
+}
+
+// --- the gate is shared, not reimplemented per caller ------------------------
+{
+  const { relayAllowed } = await import("../src/lib/serp.js");
+  check("relayAllowed reads the opt-in", relayAllowed(reader({ allow_public_relay: "1" })) === true);
+  check("and defaults to refusing", relayAllowed(reader({})) === false);
+
+  // Reported by the security review: the contact-reveal path relayed a
+  // candidate's Reddit handle with no consent gate at all.
+  const { redditLookup } = await import("../src/lib/social.js");
+  const out = await redditLookup("asharao");
+  check("a Reddit handle is not relayed without consent", out.skipped === "needs the public relay" && out.found === false, out);
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
