@@ -1,4 +1,4 @@
-import { searchWeb, availableBackends, parseDdgLite, parseMojeek, unwrapDdg, keylessSearch } from "../src/lib/serp.js";
+import { searchWeb, availableBackends, parseDdgLite, parseMojeek, unwrapDdg, keylessSearch, RELAY_OPT_IN } from "../src/lib/serp.js";
 
 /* The point of this layer is that no single vendor can take search down. So the
    tests are mostly about failure: what happens when a backend errors, returns
@@ -14,7 +14,8 @@ const reader = (cfg) => (k) => cfg[k] || "";
 
 // --- backend selection -------------------------------------------------------
 {
-  check("keyless is always available", availableBackends(reader({})).map((b) => b.id).join() === "keyless");
+  check("keyless is available for ordinary searches", availableBackends(reader({})).map((b) => b.id).join() === "keyless");
+  check("the opt-in key is named once and exported", RELAY_OPT_IN === "allow_public_relay");
   check("a Brave key takes priority", availableBackends(reader({ brave_key: "x" }))[0].id === "brave");
   check("SearXNG outranks keyless", availableBackends(reader({ searxng_url: "http://s" })).map((b) => b.id).join() === "searxng,keyless");
   // Apify last on purpose: it still works, but nothing depends on it.
@@ -45,6 +46,33 @@ const reader = (cfg) => (k) => cfg[k] || "";
   check("all backends broken throws rather than reporting 'no results'", /backend down/.test(threw?.message || ""), threw?.message);
 
   check("an empty query costs nothing", (await searchWeb("  ", { read: reader({}) })).rows.length === 0);
+}
+
+// --- personal data must not reach the public relays by default ---------------
+{
+  /* The keyless tier goes through r.jina.ai / allorigins / codetabs, so the
+     query text is visible to those operators. A query naming a candidate is
+     personal data, and handing it to an unvetted third party is exactly what
+     this guard exists to stop. */
+  const plain = availableBackends(reader({})).map((b) => b.id);
+  const sensitive = availableBackends(reader({}), { sensitive: true }).map((b) => b.id);
+  check("a role search may use the public relays", plain.includes("keyless"));
+  check("a search naming a person may not", !sensitive.includes("keyless"), sensitive);
+
+  const optedIn = availableBackends(reader({ allow_public_relay: "1" }), { sensitive: true }).map((b) => b.id);
+  check("...unless the user opted in", optedIn.includes("keyless"), optedIn);
+
+  const withBackend = availableBackends(reader({ brave_key: "k" }), { sensitive: true }).map((b) => b.id);
+  check("a real backend serves sensitive searches without any relay", withBackend.join() === "brave", withBackend);
+
+  // Silently returning nothing would read as "this candidate has no CV".
+  let blocked = null;
+  try { await searchWeb("\"Asha Rao\" resume", { read: reader({}), sensitive: true }); } catch (e) { blocked = e; }
+  check("blocked sensitive search explains itself", /won't send it through the public relays/.test(blocked?.message || ""), blocked?.message);
+  check("...and names the ways to fix it", /Brave|SearXNG|Apify/.test(blocked?.message || ""), blocked?.message);
+
+  const ok = await searchWeb("q", { read: reader({ apify: "t" }), sensitive: true, impls: { apify: async () => [{ url: "https://a.com" }] } });
+  check("a sensitive search still runs on a contracted backend", ok.via === "apify", ok);
 }
 
 // --- normalisation -----------------------------------------------------------

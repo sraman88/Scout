@@ -152,7 +152,10 @@ export const confidenceLabel = (c) => (c >= 0.8 ? "strong" : c >= 0.65 ? "likely
    has — Brave, a self-hosted SearXNG, the keyless engines, or Apify. It used to
    call the Apify actor directly, which meant no token, no CV search.
    `serpFetch` stays injectable for tests and for swapping in another source. */
-const defaultSerp = async (query) => (await searchWeb(query, { count: 15 })).rows;
+/* Marked sensitive: this query always carries a named individual and usually
+   their employer, so it must not be relayed through a public CORS proxy unless
+   the user has opted in. See RELAY_OPT_IN in lib/serp.js. */
+const defaultSerp = async (query) => (await searchWeb(query, { count: 15, sensitive: true })).rows;
 
 export async function findCandidateDocs(name, ctx = {}, { serpFetch = defaultSerp } = {}) {
   if (!name || typeof serpFetch !== "function") return [];

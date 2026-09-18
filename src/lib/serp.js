@@ -122,13 +122,22 @@ async function apifySearch(query, { count = 15 } = {}) {
   return rows.map((r) => row(r.profile_url, r.name, r.bio, "apify"));
 }
 
-/* Which backends are usable right now, best first. Exported so the UI can show
-   the user what their search is actually running on. */
-export function availableBackends(read = getStoredKey) {
+/* The keyless tier reaches the engines through the public CORS relays in
+   proxyFetch.js — r.jina.ai, allorigins, codetabs — which means the QUERY TEXT
+   is visible to whoever runs them. For a role title that is unremarkable. For a
+   query naming a private individual ("Asha Rao" "Freshworks" resume) it is
+   personal data handed to an unvetted third party, which a recruiting product
+   should not do silently: under DPDP and GDPR that relay is a processor nobody
+   agreed to. So a search can declare itself sensitive, and sensitive searches
+   skip the relays unless the user has explicitly opted in. */
+export const RELAY_OPT_IN = "allow_public_relay";
+
+export function availableBackends(read = getStoredKey, { sensitive = false } = {}) {
   const out = [];
   if (read("brave_key")) out.push({ id: "brave", label: "Brave Search API" });
   if (read("searxng_url")) out.push({ id: "searxng", label: "SearXNG" });
-  out.push({ id: "keyless", label: "DuckDuckGo + Mojeek" }); // always available
+  // Direct, contracted or self-hosted backends above; public relays below.
+  if (!sensitive || read(RELAY_OPT_IN) === "1") out.push({ id: "keyless", label: "DuckDuckGo + Mojeek" });
   if (read("apify")) out.push({ id: "apify", label: "Apify Google actor" });
   return out;
 }
@@ -136,7 +145,7 @@ export function availableBackends(read = getStoredKey) {
 /* Run the query against the best available backend, falling through on failure.
    Returns {rows, via, tried} so a caller can report which backend answered
    rather than silently returning fewer results. */
-export async function searchWeb(query, { count = 15, read = getStoredKey, impls = {} } = {}) {
+export async function searchWeb(query, { count = 15, read = getStoredKey, impls = {}, sensitive = false } = {}) {
   if (!String(query || "").trim()) return { rows: [], via: null, tried: [] };
 
   const run = {
@@ -147,9 +156,19 @@ export async function searchWeb(query, { count = 15, read = getStoredKey, impls 
     ...(impls.extra || {}),
   };
 
+  const backends = availableBackends(read, { sensitive });
+  /* Nothing left once the relays are excluded: say so instead of quietly
+     returning no results, which would read as "this person has no CV". */
+  if (!backends.length) {
+    throw new Error(
+      "This search names a person, so Scout won't send it through the public relays. " +
+      "Add a Brave key, a SearXNG URL or an Apify token in Settings — or allow the public relay there if you accept that those operators see the query."
+    );
+  }
+
   const tried = [];
   let lastErr = null;
-  for (const backend of availableBackends(read)) {
+  for (const backend of backends) {
     try {
       const rows = await run[backend.id]();
       tried.push({ id: backend.id, count: rows.length });

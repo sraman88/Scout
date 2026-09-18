@@ -58,6 +58,7 @@ export function SettingsModal({ close, provider, setProvider }) {
     brave_key: getStoredKey("brave_key") || "",
     searxng_url: getStoredKey("searxng_url") || "",
   }));
+  const [allowRelay, setAllowRelay] = useState(() => getStoredKey("allow_public_relay") === "1");
   const [actors, setActors] = useState(() => Object.fromEntries(
     Object.entries(ACTOR_DEFAULTS).map(([k, d]) => [k, getStoredKey(k) || d])
   ));
@@ -92,6 +93,7 @@ export function SettingsModal({ close, provider, setProvider }) {
     setStoredKey("competitor_provider", competitorModel.provider || "gemini");
     setStoredKey("competitor_api_key", (competitorModel.apiKey || "").trim());
     setStoredKey("competitor_base_url", (competitorModel.baseURL || "").trim());
+    setStoredKey("allow_public_relay", allowRelay ? "1" : "");
     setStoredKey("onboarding_done", "1");
     close();
   }
@@ -182,7 +184,21 @@ export function SettingsModal({ close, provider, setProvider }) {
             <Field id="searxng_url" label="SearXNG instance URL" value={keys.searxng_url}
               onChange={(v) => setKey("searxng_url", v)} placeholder="https://searx.example.com"
               hint="A SearXNG you run yourself, with the JSON format enabled. Free and unlimited, but it needs a server." />
-            <p className="hint">Without either, Scout falls back to DuckDuckGo and Mojeek through public proxies — free, lower yield, and best-effort.</p>
+            <p className="hint">Without either, Scout falls back to DuckDuckGo and Mojeek through public relay services — free, lower yield, and best-effort.</p>
+
+            <div className="frow" style={{ marginTop: 14 }}>
+              <label htmlFor="allow_public_relay" style={{ alignItems: "flex-start" }}>
+                <input id="allow_public_relay" type="checkbox" checked={allowRelay} style={{ width: "auto", marginTop: 2 }}
+                  onChange={(e) => { setAllowRelay(e.target.checked); setDirty(true); }} />
+                <span>Allow personal lookups through the public relays</span>
+              </label>
+              <p className="hint">
+                Those relays (r.jina.ai, allorigins, codetabs) see the text of every query sent through them. Role
+                searches go through them either way. This setting governs lookups that name a <b>person</b> — finding a
+                candidate&apos;s CV, or checking which platforms they are on — which would hand a third party that
+                candidate&apos;s name. Off by default; those lookups use your Brave, SearXNG or Apify backend instead.
+              </p>
+            </div>
           </section>
 
           <section className="fsec">

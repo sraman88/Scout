@@ -22,6 +22,8 @@
 // -----------------------------------------------------------------------------
 import { proxyFetch } from "./proxyFetch.js";
 import { ghHeaders } from "./github.js";
+import { getStoredKey } from "./storage.js";
+import { RELAY_OPT_IN } from "./serp.js";
 
 /* kind: code | writing | community | data | design
    direct:true  -> the endpoint sends CORS headers, so fetch() works from the
@@ -142,12 +144,23 @@ function safeDetail(site, data) {
    `unchecked` is distinct from `found:false` on purpose: a proxy that timed out
    is not evidence the account doesn't exist, and saying so would be a lie the
    recruiter can't see through. */
-export async function findFootprint(username, { only = null, onResult } = {}) {
+export async function findFootprint(username, { only = null, onResult, read = getStoredKey } = {}) {
   const u = String(username || "").trim().replace(/^@/, "");
   if (!u || /\s/.test(u)) return [];
   const sites = only ? SITES.filter((s) => only.includes(s.id)) : SITES;
 
+  /* The non-CORS sites are reached through the public relays, which means the
+     relay operator learns that someone is looking up this person. That is a
+     lookup of a named individual, so it is opt-in — the direct sites, which are
+     the majority, still run either way. */
+  const relayAllowed = read(RELAY_OPT_IN) === "1";
+
   return Promise.all(sites.map(async (site) => {
+    if (!site.direct && !relayAllowed) {
+      const row = { id: site.id, label: site.label, kind: site.kind, profile: site.profile(u), found: false, skipped: "needs the public relay" };
+      onResult?.(row);
+      return row;
+    }
     const outcome = site.direct ? await checkDirect(site, u) : await checkProxied(site, u);
     const row = { id: site.id, label: site.label, kind: site.kind, profile: site.profile(u), ...outcome };
     onResult?.(row);
