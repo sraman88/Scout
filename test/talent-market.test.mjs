@@ -30,8 +30,13 @@ const check = (name, ok, detail) => {
     }) }
   );
   check("drops the hiring company from its own peer list", !out.peers.some((p) => p.company === "OpenText"), out.peers.map((p) => p.company));
+  check("counts what it dropped", out.coverage.excludedSelf === 1, out.coverage);
+  check("reports how many came back and the cap", out.coverage.returned === 2 && out.coverage.cap === 12, out.coverage);
+  check("counts the citations behind it", out.coverage.citations === 1, out.coverage);
+  check("knows it is not truncated", out.coverage.capped === false, out.coverage);
   check("keeps real peers and their equivalent titles", out.peers.length === 2 && out.peers[0].equivalentTitle === "People Relations Lead", out.peers);
-  check("carries the hiring flag", out.peers[0].hiring === true && out.peers[1].hiring === false);
+  check("keeps the model's hiring claim, named as a claim", out.peers[0].hiringClaim === true && out.peers[1].hiringClaim === false);
+  check("does not expose it as an established fact", out.peers.every((p) => p.hiring === undefined), out.peers[0]);
   check("passes citations through", out.sources[0].uri === "https://levels.fyi/x");
   check("keeps non-obvious pools", out.pools[0].startsWith("Big-4"));
 }
