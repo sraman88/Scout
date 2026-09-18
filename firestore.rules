@@ -1,0 +1,73 @@
+rules_version = '2';
+
+/* Scout stores each signed-in user's API keys in users/{uid}. These rules ARE
+   the security boundary for those keys.
+   The client is a static bundle that anyone can read and modify, so nothing
+   here can be enforced in JavaScript — if these rules are permissive, every
+   user's Groq, Gemini, GitHub, Apify and Brave keys are readable by any other
+   signed-in user. Until this file existed, nothing in the repository stated
+   what that boundary was, so no reviewer could tell.
+
+   Deploy:  firebase deploy --only firestore:rules
+   Test:    firebase emulators:start --only firestore
+*/
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      /* Fields the app stores today. */
+      function currentFields() {
+        return [
+          'groq', 'gemini', 'github', 'apify', 'brave_key', 'searxng_url',
+          'apify_profile_actor', 'apify_search_actor', 'apify_google_actor',
+          'apify_company_actor', 'apify_browser_actor',
+          'competitor_provider', 'competitor_api_key', 'competitor_base_url', 'competitor_model',
+          'groq_model', 'gemini_model', 'provider_pref',
+          'allow_public_relay', 'onboarding_done'
+        ];
+      }
+
+      /* Fields earlier versions of Scout wrote. Documents created back then
+         still carry them, and because a merge write is validated against the
+         WHOLE resulting document, leaving them out would reject the next save
+         a long-standing user makes — locking them out of their own settings.
+         Kept for compatibility, not because anything writes them now. */
+      function legacyFields() {
+        return ['apify_actor', 'apollo', 'country', 'jd_template', 'role_family'];
+      }
+
+      /* On per-value type checks: the rules language cannot iterate a map's
+         values, so "every value is a string" is not expressible without one
+         clause per field. Twenty-five such clauses would make this file harder
+         to audit, and auditability is the security property here. The key
+         allow-list plus the count cap already stop arbitrary structure; abuse
+         of one's OWN document is bounded by Firestore's per-document limit and
+         costs the abuser nothing but the project's quota. Stated so the gap is
+         a decision rather than an oversight. */
+      function writeIsWellFormed() {
+        return request.resource.data.keys().hasOnly(currentFields().concat(legacyFields()))
+            && request.resource.data.keys().size() <= 30;
+      }
+
+      allow get: if isOwner();
+      allow list: if false;                        // the user set is never enumerable
+      allow create, update: if isOwner() && writeIsWellFormed();
+      allow delete: if isOwner();                  // a user may clear their own settings
+
+      match /{document=**} {                       // no sub-collections are used
+        allow read, write: if false;
+      }
+    }
+
+    /* Everything else is denied explicitly rather than by omission, so a new
+       collection cannot be added later without someone writing a rule for it. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

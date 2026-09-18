@@ -10,10 +10,19 @@ const PROXIES = [
 ];
 
 export async function proxyFetch(url) {
+  /* The first relay interpolates the target straight into its path
+     (`https://r.jina.ai/${u}`), so a target that is not a plain absolute http
+     URL would be pasted into somebody else's URL structure. Nothing in the app
+     passes one today, but the check belongs next to the concatenation rather
+     than in the callers' heads. */
+  const target = String(url || "");
+  if (!/^https?:\/\/[^\s"'<>\\^`{|}]+$/i.test(target)) {
+    throw new Error("Refusing to relay a non-absolute or malformed URL");
+  }
   let lastErr = null;
   for (const p of PROXIES) {
     try {
-      const res = await fetchWithTimeout(p(url), { timeoutMs: 12000 });
+      const res = await fetchWithTimeout(p(target), { timeoutMs: 12000 });
       if (!res.ok) { lastErr = new Error(`Proxy ${res.status}`); continue; }
       const txt = await res.text();
       if (!txt || txt.length < 50) { lastErr = new Error("Empty response"); continue; }

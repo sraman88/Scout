@@ -183,7 +183,7 @@ export function SettingsModal({ close, provider, setProvider }) {
               hint={<>A real search API. <a href="https://brave.com/search/api/" target="_blank" rel="noreferrer">$5/month free credit</a>, about 1,000 queries.</>} />
             <Field id="searxng_url" label="SearXNG instance URL" value={keys.searxng_url}
               onChange={(v) => setKey("searxng_url", v)} placeholder="https://searx.example.com"
-              hint="A SearXNG you run yourself, with the JSON format enabled. Free and unlimited, but it needs a server." />
+              hint="A SearXNG you run yourself, with the JSON format enabled. Free and unlimited, but it needs a server — and its host must be added to the Content-Security-Policy in index.html and vercel.json, or the browser will block it." />
             <p className="hint">Without either, Scout falls back to DuckDuckGo and Mojeek through public relay services — free, lower yield, and best-effort.</p>
 
             <div className="frow" style={{ marginTop: 14 }}>

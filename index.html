@@ -4,7 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React</title>
+
+    <!-- GitHub Pages cannot set response headers, so the policy rides in the
+         document. Vercel gets the same policy as a real header in vercel.json,
+         plus frame-ancestors, which a meta tag ignores.
+         script-src 'self' is the load-bearing part: no inline script and no
+         remote script means an injected tag or a compromised CDN cannot run. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.groq.com https://generativelanguage.googleapis.com https://api.perplexity.ai https://api.search.brave.com https://lite.duckduckgo.com https://www.mojeek.com https://r.jina.ai https://api.allorigins.win https://api.codetabs.com https://api.apify.com https://api.github.com https://api.stackexchange.com https://gitlab.com https://dev.to https://huggingface.co https://registry.npmjs.org https://hub.docker.com https://codeforces.com https://hacker-news.firebaseio.com https://hn.algolia.com https://www.wikidata.org https://boards-api.greenhouse.io https://api.lever.co https://*.googleapis.com https://*.firebaseio.com https://securetoken.googleapis.com https://*.firebaseapp.com; frame-src https://view.officeapps.live.com https:; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>Scout — sourcing intelligence</title>
   </head>
   <body>
     <div id="root"></div>
