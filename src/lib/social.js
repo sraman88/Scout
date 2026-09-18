@@ -1,8 +1,14 @@
 import { proxyFetch } from "./proxyFetch.js";
+import { relayAllowed } from "./serp.js";
 
 export async function redditLookup(username) {
   const u = encodeURIComponent(username);
   const out = { found: false, karma: null, age: null, subs: [], recent_posts: [], url: `https://www.reddit.com/user/${u}/` };
+  /* Reddit has no CORS, so this reaches it through the public relays — which
+     would tell those operators that someone is looking up this person. Same
+     rule as the CV lookup: not without consent. `skipped` keeps it distinct
+     from "checked and not found". */
+  if (!relayAllowed()) { out.skipped = "needs the public relay"; return out; }
   try {
     const aboutRaw = await proxyFetch(`https://www.reddit.com/user/${u}/about.json`);
     const about = JSON.parse(aboutRaw);

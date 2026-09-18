@@ -4,10 +4,12 @@ import { senseFamily, gateSources, FAMILIES } from "../lib/relevanceEngine.js";
 import { deriveRole, LEVEL_MAP } from "../lib/senseRole.js";
 import { getStoredKey } from "../lib/storage.js";
 import { proxyFetch } from "../lib/proxyFetch.js";
-import { fetchUrlContent, searchLinkedInCandidates, searchGoogleResults } from "../lib/apifySearch.js";
+import { fetchUrlContent, searchLinkedInCandidates } from "../lib/apifySearch.js";
 import { searchGitHubUsers } from "../lib/github.js";
 import { searchStackOverflow } from "../lib/stackoverflow.js";
 import { searchLinkedInXray } from "../lib/xraySearch.js";
+import { searchWeb } from "../lib/serp.js";
+import { searchFreeSources } from "../lib/freeSources.js";
 import { searchHackerNewsLeads } from "../lib/hackernews.js";
 import { summarizeLeads } from "../lib/summarizeLeads.js";
 import { scoreBatch } from "../lib/scoreProfile.js";
@@ -216,8 +218,18 @@ export default function ScoutPage() {
 
     const warnings = [];
     let harvested = [];
+    /* Several sources now cover the same ground — the keyless X-ray and the
+       Apify actor both return LinkedIn people — so the same person can arrive
+       twice. Dedupe on the way in rather than showing them twice. */
+    const takenKeys = new Set();
     const capture = (items) => {
-      const mapped = (items || []).map(toIntakeProfile);
+      const mapped = (items || []).map(toIntakeProfile).filter((p) => {
+        const k = keyOf(p);
+        if (takenKeys.has(k)) return false;
+        takenKeys.add(k);
+        return true;
+      });
+      if (!mapped.length) return;
       harvested = harvested.concat(mapped);
       setResults((prev) => [...prev, ...mapped]);
       setCount((n) => n + mapped.length);
@@ -233,12 +245,24 @@ export default function ScoutPage() {
     const allow = new Set((gated || gateSources(s)).map((x) => x.id));
     const wantsLinkedIn = allow.has("linkedin") || allow.has("serp");
 
+    /* The X-ray is no longer a fallback for people without a token: it runs on
+       every LinkedIn-shaped search, alongside the paid actor when one is
+       configured. Two keyless engines plus the actor beats either alone, and
+       nothing in the list below is required for the search to work. */
     const tasks = [
+      wantsLinkedIn && { label: "LinkedIn X-ray", p: searchLinkedInXray({ titles: s.titles || [], location: loc, extra: s.skills?.slice(0, 1) || [] }) },
       wantsLinkedIn && hasApify && { label: "LinkedIn", p: searchLinkedInCandidates({ query, location: loc, maxItems: 15, timeout: 30 }) },
-      wantsLinkedIn && hasApify && { label: "Google", p: searchGoogleResults({ query: `${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim() }) },
-      wantsLinkedIn && !hasApify && { label: "LinkedIn X-ray", p: searchLinkedInXray({ titles: s.titles || [], location: loc, extra: s.skills?.slice(0, 1) || [] }) },
+      /* Web search goes through the pluggable backend now, so it runs on Brave,
+         a self-hosted SearXNG or the keyless engines — not only on Apify. */
+      wantsLinkedIn && { label: "Web", p: searchWeb(`${query} ${loc} (site:linkedin.com/in OR resume OR profile)`.trim(), { count: 12 })
+        .then(({ rows }) => rows.map((r) => ({ source: "google", name: r.title, bio: r.snippet, profile_url: r.url }))) },
       allow.has("github") && { label: "GitHub", p: searchGitHubUsers({ ghLanguage: primarySkill, ghLocation: loc }) },
       allow.has("stackoverflow") && { label: "StackOverflow", p: searchStackOverflow({ ghLanguage: primarySkill, profQuery: query }) },
+      /* Free technical sources: people found by what they published rather than
+         by what they wrote about themselves. Keyless, and for engineering
+         searches they remove the LinkedIn dependency altogether. */
+      allow.has("github") && primarySkill && { label: "dev.to + HF + GitLab",
+        p: searchFreeSources({ skill: primarySkill, limit: 6 }).then((groups) => groups.flatMap((g) => g.people)) },
     ].filter(Boolean);
     setSourcesUsed(tasks.map((t) => t.label));
 

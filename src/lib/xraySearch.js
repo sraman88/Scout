@@ -1,4 +1,5 @@
 import { proxyFetch } from "./proxyFetch.js";
+import { parseDdgLite, parseMojeek } from "./serp.js";
 
 /* Keyless LinkedIn X-ray.
 
@@ -10,7 +11,14 @@ import { proxyFetch } from "./proxyFetch.js";
    DuckDuckGo Lite is scrapable through the same text proxy the JD fetcher
    uses, and site:linkedin.com/in returns real people with names, headlines
    and profile URLs. Lower yield than the paid actor, but free, and it makes
-   the product work with only an LLM key. */
+   the product work with only an LLM key.
+
+   Now multi-engine. One scraped engine is a single point of failure: DDG
+   rate-limits an IP, changes its markup, or the proxy in front of it dies, and
+   the only keyless source in the product goes with it. Mojeek runs its own
+   index rather than reselling Bing or Google, so it fails independently. Both
+   are queried in parallel and merged, which raises yield as well as
+   survivability. */
 
 /* DDG handles OR-groups badly — one combined query returned 2 results where
    the same titles asked separately returned 6 each. So: one query per title,
@@ -22,8 +30,6 @@ export function buildXrayQuery({ title, location = "", extra = [] }) {
   return parts.join(" ");
 }
 
-const ENTRY = /^\d+\.\[([^\]]+)\]\((https?:\/\/[^)]+)\)\s*\n([\s\S]*?)(?=\n\d+\.\[|\n*$)/gm;
-
 /* LinkedIn's country subdomain is the only location signal an X-ray gives us.
    Guessing beyond that would feed the prefilter a location the profile never
    claimed, so anything else stays blank. */
@@ -32,14 +38,6 @@ const COUNTRY = {
   au: "Australia", ca: "Canada", de: "Germany", fr: "France", nl: "Netherlands",
   ie: "Ireland", za: "South Africa", my: "Malaysia", ph: "Philippines",
 };
-
-function realUrl(href) {
-  try {
-    const uddg = new URL(href).searchParams.get("uddg");
-    if (uddg) return decodeURIComponent(uddg);
-    return /linkedin\.com\/in\//i.test(href) ? href : "";
-  } catch { return ""; }
-}
 
 const ROLE_WORDS = /\b(hr|human|resources|manager|partner|director|senior|lead|head|specialist|executive|officer|analyst|consultant|recruiter|engineer|business)\b/i;
 
@@ -70,48 +68,53 @@ function splitTitle(raw, username) {
   return { name, headline };
 }
 
-function parse(text) {
+/* Turn normalised SERP rows into candidate profiles. Engine-agnostic: serp.js
+   hands back {url, title, snippet} whichever engine produced it. */
+export function rowsToProfiles(rows) {
   const out = [];
-  for (const m of text.matchAll(ENTRY)) {
-    const url = realUrl(m[2]);
+  for (const r of rows || []) {
+    const url = r.url;
     if (!url || !/linkedin\.com\/in\//i.test(url)) continue;
 
     const username = (url.split("/in/")[1] || "").replace(/[/?#].*$/, "");
     if (!username) continue;
 
-    const { name, headline } = splitTitle(m[1], username);
-    const snippet = (m[3] || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+    const { name, headline } = splitTitle(r.title, username);
+    const snippet = String(r.snippet || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
     const host = (url.match(/https?:\/\/([a-z]{2})\.linkedin\.com/i) || [])[1]?.toLowerCase();
 
     out.push({
       source: "linkedin",
       username,
-      name: (name || username).replace(/[‎‏‪-‮]/g, "").trim(),
+      name: (name || username).replace(/[\u200e\u200f\u202a-\u202e]/g, "").trim(),
       bio: headline || snippet.slice(0, 140),
       summary: snippet.slice(0, 400),
       profile_url: url.startsWith("http") ? url : `https://${url}`,
       location: COUNTRY[host] || "",
-      via: "xray",
+      via: r.via || "xray",
     });
   }
   return out;
 }
 
-export async function searchLinkedInXray({ titles = [], location = "", extra = [], limit = 15 }) {
+export async function searchLinkedInXray({ titles = [], location = "", extra = [], limit = 15, fetchText = proxyFetch } = {}) {
   const picks = titles.filter(Boolean).slice(0, 3);
   if (!picks.length) return [];
 
-  const batches = await Promise.all(picks.map(async (title) => {
-    try {
-      return parse(await proxyFetch(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(buildXrayQuery({ title, location, extra }))}`));
-    } catch {
-      return []; // one blocked query shouldn't sink the rest
-    }
-  }));
+  /* One query per title per engine, all in parallel. A query that throws — a
+     blocked proxy, a rate-limited engine — contributes nothing and costs the
+     others nothing. */
+  const jobs = [];
+  for (const title of picks) {
+    const q = buildXrayQuery({ title, location, extra });
+    jobs.push(fetchText(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`).then(parseDdgLite).catch(() => []));
+    jobs.push(fetchText(`https://www.mojeek.com/search?q=${encodeURIComponent(q)}`).then(parseMojeek).catch(() => []));
+  }
+  const rows = (await Promise.all(jobs)).flat();
 
   const seen = new Set();
   const merged = [];
-  for (const p of batches.flat()) {
+  for (const p of rowsToProfiles(rows)) {
     if (seen.has(p.username)) continue;
     seen.add(p.username);
     merged.push(p);

@@ -55,7 +55,10 @@ export function SettingsModal({ close, provider, setProvider }) {
     gemini: getStoredKey("gemini") || "",
     github: getStoredKey("github") || "",
     apify: getStoredKey("apify") || "",
+    brave_key: getStoredKey("brave_key") || "",
+    searxng_url: getStoredKey("searxng_url") || "",
   }));
+  const [allowRelay, setAllowRelay] = useState(() => getStoredKey("allow_public_relay") === "1");
   const [actors, setActors] = useState(() => Object.fromEntries(
     Object.entries(ACTOR_DEFAULTS).map(([k, d]) => [k, getStoredKey(k) || d])
   ));
@@ -90,6 +93,7 @@ export function SettingsModal({ close, provider, setProvider }) {
     setStoredKey("competitor_provider", competitorModel.provider || "gemini");
     setStoredKey("competitor_api_key", (competitorModel.apiKey || "").trim());
     setStoredKey("competitor_base_url", (competitorModel.baseURL || "").trim());
+    setStoredKey("allow_public_relay", allowRelay ? "1" : "");
     setStoredKey("onboarding_done", "1");
     close();
   }
@@ -97,7 +101,7 @@ export function SettingsModal({ close, provider, setProvider }) {
   function clearAll() {
     [...Object.keys(keys), ...Object.keys(ACTOR_DEFAULTS), "competitor_provider", "competitor_api_key", "competitor_base_url", "onboarding_done"]
       .forEach((k) => setStoredKey(k, ""));
-    setKeys({ groq: "", gemini: "", github: "", apify: "" });
+    setKeys({ groq: "", gemini: "", github: "", apify: "", brave_key: "", searxng_url: "" });
     setActors({ ...ACTOR_DEFAULTS });
     setCompetitorModel({ provider: "gemini", apiKey: "", baseURL: "" });
     setConfirmClear(false);
@@ -164,13 +168,44 @@ export function SettingsModal({ close, provider, setProvider }) {
               hint="Recommended — lifts the rate limit from 60 to 5,000 per hour, and powers skill evidence." />
             <Field id="apify" label="Apify token" pill={pill("apify")} value={keys.apify} onChange={(v) => setKey("apify", v)}
               type="password" placeholder="apify_api_…" error={errors.apify}
-              hint="Unlocks LinkedIn search, company mapping and CV lookup. Without it Scout falls back to a keyless X-ray." />
+              hint="Optional. Raises LinkedIn yield and enables company mapping — the keyless X-ray and web search run either way." />
+          </section>
+
+          <section className="fsec">
+            <h3>Web search</h3>
+            <p className="note">
+              Scout searches the web for CVs, company research and the keyless LinkedIn X-ray. It works with
+              no key at all — these only make it faster and higher-yield. Tried best-first, and Apify is used
+              last rather than first.
+            </p>
+            <Field id="brave_key" label="Brave Search API key" pill={pill("brave_key")} value={keys.brave_key}
+              onChange={(v) => setKey("brave_key", v)} type="password" placeholder="BSA…"
+              hint={<>A real search API. <a href="https://brave.com/search/api/" target="_blank" rel="noreferrer">$5/month free credit</a>, about 1,000 queries.</>} />
+            <Field id="searxng_url" label="SearXNG instance URL" value={keys.searxng_url}
+              onChange={(v) => setKey("searxng_url", v)} placeholder="https://searx.example.com"
+              hint="A SearXNG you run yourself, with the JSON format enabled. Free and unlimited, but it needs a server — and its host must be added to the Content-Security-Policy in index.html and vercel.json, or the browser will block it." />
+            <p className="hint">Without either, Scout falls back to DuckDuckGo and Mojeek through public relay services — free, lower yield, and best-effort.</p>
+
+            <div className="frow" style={{ marginTop: 14 }}>
+              <label htmlFor="allow_public_relay" style={{ alignItems: "flex-start" }}>
+                <input id="allow_public_relay" type="checkbox" checked={allowRelay} style={{ width: "auto", marginTop: 2 }}
+                  onChange={(e) => { setAllowRelay(e.target.checked); setDirty(true); }} />
+                <span>Allow personal lookups through the public relays</span>
+              </label>
+              <p className="hint">
+                Those relays (r.jina.ai, allorigins, codetabs) see the text of every query sent through them. Role
+                searches go through them either way. This setting governs lookups that name a <b>person</b> — finding a
+                candidate&apos;s CV, or checking which platforms they are on — which would hand a third party that
+                candidate&apos;s name. Off by default; those lookups use your Brave, SearXNG or Apify backend instead.
+              </p>
+            </div>
           </section>
 
           <section className="fsec">
             <h3>Apify actors</h3>
             <p className="note">
-              Defaults work as-is — change these only to swap in a different actor from{" "}
+              Optional. Apify raises yield on LinkedIn search and company mapping, but nothing requires it —
+              every feature has a keyless path. Change these only to swap in a different actor from{" "}
               <a href="https://apify.com/store" target="_blank" rel="noreferrer">apify.com/store</a>. Format: <code>author~actor-name</code>.
             </p>
             <Field id="apify_search_actor" label="LinkedIn candidate search" value={actors.apify_search_actor}

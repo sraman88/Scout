@@ -101,20 +101,44 @@ function describe({ role, family, skills = [], location, company, level }) {
   ].filter(Boolean).join("\n");
 }
 
+const PEER_CAP = 12;
+
+/* Coverage is deliberately built from things we can COUNT, never from the
+   model's own account of its work. Asking an LLM "how many companies did you
+   benchmark?" produces a confident number with nothing behind it, which is
+   exactly the kind of false precision this panel is being fixed to remove.
+   So: what came back, what the cap was, how many citations the grounding
+   actually returned, and what we dropped. All measurable. */
 function parsePeers(out, spec, sources) {
   const self = String(spec.company || "").trim().toLowerCase();
+  const raw = Array.isArray(out.peers) ? out.peers : [];
+  const named = raw.filter((p) => p?.company);
+  const kept = named
+    .filter((p) => String(p.company).trim().toLowerCase() !== self)
+    .map((p) => ({
+      company: String(p.company).trim(),
+      why: String(p.why || "").trim(),
+      equivalentTitle: String(p.equivalentTitle || "").trim(),
+      /* The model's own "hiring" flag is a claim with nothing behind it. Kept
+         as a hint, but the UI only shows a hiring badge when a job board
+         confirms it — see lib/companyIntel.js. */
+      hiringClaim: !!p.hiring,
+    }))
+    .slice(0, PEER_CAP);
+
   return {
-    peers: (Array.isArray(out.peers) ? out.peers : [])
-      .filter((p) => p?.company && String(p.company).trim().toLowerCase() !== self)
-      .map((p) => ({
-        company: String(p.company).trim(),
-        why: String(p.why || "").trim(),
-        equivalentTitle: String(p.equivalentTitle || "").trim(),
-        hiring: !!p.hiring,
-      }))
-      .slice(0, 12),
+    peers: kept,
     pools: (Array.isArray(out.pools) ? out.pools : []).map(String).slice(0, 5),
     sources,
+    coverage: {
+      returned: kept.length,
+      cap: PEER_CAP,
+      /* Hit the cap -> the list is truncated, not exhaustive. */
+      capped: kept.length >= PEER_CAP,
+      excludedSelf: named.length - kept.length,
+      citations: (sources || []).length,
+      unnamed: raw.length - named.length,
+    },
   };
 }
 
@@ -129,6 +153,7 @@ function parseSalary(out, sources) {
     }))
     .filter((b) => b.level && (b.min !== null || b.max !== null));
 
+  const rawBands = Array.isArray(out.bands) ? out.bands : [];
   return {
     currency: String(out.currency || "INR"),
     unit: String(out.unit || "LPA"),
@@ -140,6 +165,15 @@ function parseSalary(out, sources) {
       .slice(0, 6),
     caveat: String(out.caveat || "").trim(),
     sources,
+    coverage: {
+      bands: bands.length,
+      /* Bands the model offered that carried no usable figure. A model that
+         returns five levels and two numbers is weaker evidence than one that
+         returns three of each, and the panel should be able to say so. */
+      discarded: rawBands.length - bands.length,
+      citations: (sources || []).length,
+      hasData: bands.length > 0,
+    },
   };
 }
 

@@ -5,6 +5,7 @@ import { resolveLevelMap, peopleSearchUrl } from "../lib/levelMap.js";
 import { resolveTalentMarket, salaryExtent, getGroundedModel, friendlyError } from "../lib/talentMarket.js";
 import { getCompetitorModel } from "../lib/competitorModel.js";
 import { getStoredKey } from "../lib/storage.js";
+import { companyIntel } from "../lib/companyIntel.js";
 
 // CompanyMap — contrasting dark panel, on the same page as the search.
 // Three things a recruiter actually needs from a target company:
@@ -14,6 +15,10 @@ import { getStoredKey } from "../lib/storage.js";
 // The company name is seeded from the JD when the LLM found one.
 
 const TIER_ORDER = ["Leadership", "Directors", "Managers", "Individual Contributors"];
+/* The scraper's row cap. Hitting it means the result is truncated, which the
+   panel has to say out loud rather than presenting 50 as if it were the total. */
+const MAP_CAP = 50;
+const possessive = (name) => `${name}${/s$/i.test(name) ? "'" : "'s"}`;
 const TIER_SHORT = { Leadership: "VP / Head", Directors: "Director", Managers: "Manager / Lead", "Individual Contributors": "IC" };
 
 function Node({ node }) {
@@ -50,7 +55,7 @@ function treeFromPeople(company, people, famLabel) {
     const top = [...byTitle.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 3);
     return {
       role: TIER_SHORT[t] || t,
-      meta: `${buckets[t].length} mapped`,
+      meta: `${buckets[t].length} of ${people.length} sampled`,
       children: top.map(([title, ps]) => ({
         role: title,
         meta: ps.length > 1 ? `${ps.length} people` : (ps[0]?.name || "1 person"),
@@ -58,7 +63,7 @@ function treeFromPeople(company, people, famLabel) {
       })),
     };
   });
-  return { role: company, meta: `${people.length} in ${famLabel}`, head: true, children };
+  return { role: company, meta: `${people.length} ${famLabel} people sampled`, head: true, children };
 }
 
 /* No token / no results — the family's typical ladder, still linked to people. */
@@ -67,8 +72,11 @@ function treeFromFamily(family, company) {
   const buckets = Object.fromEntries(TIER_ORDER.map((t) => [t, []]));
   for (const title of f.titles) (buckets[tierOf(title)] || buckets["Individual Contributors"]).push(title);
   return {
-    role: company ? `${company} — ${f.label}` : `${f.label} org`,
-    meta: "typical shape",
+    /* Never the company's name. This tree is drawn from the family taxonomy and
+       has no connection to the company typed in — labelling it "Acme — Sales"
+       made a generic template read as Acme's real org chart. */
+    role: `Typical ${f.label} ladder`,
+    meta: company ? `generic — not ${possessive(company)} actual org` : "generic structure",
     head: true,
     children: TIER_ORDER.filter((t) => buckets[t].length).map((t) => ({
       role: TIER_SHORT[t] || t,
@@ -76,6 +84,16 @@ function treeFromFamily(family, company) {
       children: buckets[t].slice(0, 3).map((title) => ({ role: title, url: peopleSearchUrl(title, company) })),
     })),
   };
+}
+
+/* Says what a panel actually looked at. Without this the map asserted numbers
+   with no denominator: "8 companies" gave no hint whether that was everything
+   found or the first eight of forty, and "50 people" was really "the scraper
+   stopped at its cap". */
+function Coverage({ parts = [] }) {
+  const shown = parts.filter(Boolean);
+  if (!shown.length) return null;
+  return <div className="cover">{shown.map((p, i) => <span key={i}>{p}</span>)}</div>;
 }
 
 export default function CompanyMap({ family = "sales", seedCompany = "", roleTitle = "", skills = [], location = "India" }) {
@@ -93,6 +111,8 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
   const [peersLoading, setPeersLoading] = useState(false);
   const [pay, setPay] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
+  const [intel, setIntel] = useState(null);
+  const [intelLoading, setIntelLoading] = useState(false);
 
   const fam = FAMILIES[family] || FAMILIES.sales;
   const hasApify = !!getStoredKey("apify");
@@ -134,7 +154,7 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
     setLoading(true); setError(""); setPeople([]);
     try {
       const list = await searchCompanyEmployees({
-        companyName: target, titles: fam.titles.slice(0, 10), locations: ["India"], maxItems: 50,
+        companyName: target, titles: fam.titles.slice(0, 10), locations: ["India"], maxItems: MAP_CAP,
       });
       setPeople(list);
       setMapped(target);
@@ -158,6 +178,21 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
       setLevelLoading(false);
     }
   }, [company, family, roleTitle, provider]);
+
+  /* Checkable public facts, so the panel can cite rather than assert. Every
+     source is isolated inside companyIntel — a dead one costs its own row. */
+  const runIntel = useCallback(async () => {
+    const target = company.trim();
+    if (!target) return;
+    setIntelLoading(true);
+    try {
+      setIntel(await companyIntel(target, { titles: fam.titles.slice(0, 8) }));
+    } catch (e) {
+      setIntel({ company: target, checked: [], error: e.message || String(e) });
+    } finally {
+      setIntelLoading(false);
+    }
+  }, [company, fam]);
 
   const findCompetitors = useCallback(async () => {
     const target = company.trim();
@@ -187,6 +222,14 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
     setRanFor(marketKey);
     setPeers(null); setPay(null);
     queueMicrotask(() => runMarket());
+  }
+
+  const intelKey = company.trim().toLowerCase();
+  const [intelFor, setIntelFor] = useState(null);
+  if (intelKey && intelKey !== intelFor && !intelLoading) {
+    setIntelFor(intelKey);
+    setIntel(null);
+    queueMicrotask(() => runIntel());
   }
 
   const levelKey = `${company.trim()}|${family}|${roleTitle}`;
@@ -241,13 +284,86 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
           ))}
         </div>
       )}
+      {/* Public, checkable facts about the company — every row links to origin */}
+      {(intelLoading || intel) && company.trim() && (
+        <div className="equiv">
+          <h4>Company intel{intel?.facts?.label ? <em> — {intel.facts.label}</em> : null}</h4>
+          {intelLoading && <div className="mapnote">Checking public sources…</div>}
+
+          {intel?.facts && (
+            <>
+              {!intel.facts.confident && (
+                <div className="mapnote">
+                  Matched “{intel.facts.label}” on name alone — check it is the right entity before relying on these figures.
+                </div>
+              )}
+              <div className="factrow">
+                {intel.facts.employees != null && (
+                  <span><b>{intel.facts.employees.toLocaleString()}</b> employees
+                    {intel.facts.employeesAsOf ? <i> as of {intel.facts.employeesAsOf}</i> : <i> (undated)</i>}</span>
+                )}
+                {intel.facts.founded && <span><b>Founded</b> <i>{intel.facts.founded}</i></span>}
+                {intel.facts.description && <span className="wide">{intel.facts.description}</span>}
+              </div>
+              <Sources list={[{ title: "Wikidata", uri: intel.facts.source }, intel.facts.website ? { title: "Website", uri: intel.facts.website } : null].filter(Boolean)} />
+            </>
+          )}
+
+          {intel?.board && (
+            <div className="board">
+              <b>{intel.board.total} open role{intel.board.total === 1 ? "" : "s"}</b> on their {intel.board.board} board
+              {intel.openForCraft.length > 0
+                ? <> · <b>{intel.openForCraft.length}</b> in {fam.label}</>
+                : <> · none in {fam.label}</>}
+              {intel.board.unverified && <i title="Lever exposes no owner name, so the board could belong to a similarly-named company"> · slug unverified</i>}
+              <div className="xlinks">
+                {intel.openForCraft.slice(0, 5).map((j, i) => (
+                  <a key={i} href={j.url} target="_blank" rel="noreferrer">{j.title}{j.location ? ` · ${j.location}` : ""} ↗</a>
+                ))}
+                <a href={intel.board.source} target="_blank" rel="noreferrer">All roles ↗</a>
+              </div>
+            </div>
+          )}
+
+          {intel?.signals?.length > 0 && (
+            <div className="board">
+              <b>Recent signal</b>
+              <div className="xlinks">
+                {intel.signals.map((sg, i) => (
+                  <a key={i} href={sg.discussion} target="_blank" rel="noreferrer" title={sg.title}>
+                    {sg.notable ? "● " : ""}{sg.title.slice(0, 64)}{sg.when ? ` · ${sg.when}` : ""} ↗
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {intel?.checked?.length > 0 && !intelLoading && (
+            <Coverage parts={[
+              `checked ${intel.checked.length} public sources`,
+              `${intel.checked.filter((c) => c.ok).length} returned data`,
+              intel.checked.filter((c) => c.error).length ? `${intel.checked.filter((c) => c.error).length} unreachable` : "",
+              !intel.facts && !intel.board && !intel.signals?.length ? "nothing public found for this name" : "",
+            ]} />
+          )}
+        </div>
+      )}
+
       {/* Who else has this talent — derived from the role, no company needed */}
       {(peersLoading || peers) && (
         <div className="equiv">
           <h4>
             Companies with similar talent
-            {peers?.peers?.length ? <em> — {peers.peers.length} for {roleTitle || fam.label}</em> : null}
+            {peers?.peers?.length ? <em> — for {roleTitle || fam.label}</em> : null}
           </h4>
+          {peers?.coverage && (
+            <Coverage parts={[
+              `${peers.coverage.returned} returned${peers.coverage.capped ? ` (capped at ${peers.coverage.cap} — more exist)` : ""}`,
+              peers.coverage.citations ? `${peers.coverage.citations} source${peers.coverage.citations === 1 ? "" : "s"} cited` : "no citations returned",
+              peers.coverage.excludedSelf ? `${peers.coverage.excludedSelf} excluded as the hiring company` : "",
+              "suggested by a web-grounded model, not an exhaustive index",
+            ]} />
+          )}
           {peersLoading && <div className="mapnote">Reading the market…</div>}
 
           {peers?.peers?.length > 0 && (
@@ -257,7 +373,9 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
                   target="_blank" rel="noreferrer" title={`Find ${p.equivalentTitle || roleTitle} at ${p.company}`}>
                   <span className="eco">
                     {p.company}
-                    {p.hiring && <i className="hiring" title="Evidence of a live or recent opening">hiring</i>}
+                    {intel?.board && intel.board.company && intel.openForCraft.length > 0
+                      && intel.board.company.toLowerCase() === p.company.toLowerCase()
+                      && <i className="hiring" title={`${intel.openForCraft.length} open role(s) on their ${intel.board.board} board`}>{intel.openForCraft.length} open</i>}
                   </span>
                   <span className="eti">{p.equivalentTitle || "—"}</span>
                   <span className="ent">{p.why}</span>
@@ -284,6 +402,14 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
             {pay?.asOf ? <em> — {pay.asOf}{pay.unit ? ` · ${pay.currency} ${pay.unit}` : ""}</em> : null}
           </h4>
           {payLoading && <div className="mapnote">Pulling salary benchmarks…</div>}
+          {pay?.coverage && !payLoading && (
+            <Coverage parts={[
+              `${pay.coverage.bands} band${pay.coverage.bands === 1 ? "" : "s"}`,
+              pay.coverage.discarded ? `${pay.coverage.discarded} dropped for missing figures` : "",
+              pay.coverage.citations ? `${pay.coverage.citations} source${pay.coverage.citations === 1 ? "" : "s"} cited` : "no citations returned",
+              "self-reported market data — check each figure at source",
+            ]} />
+          )}
 
           {pay && !pay.bands.length && !payLoading && (
             <div className="mapnote">No reliable published data found for this role and region — better to leave it blank than invent a number.</div>
@@ -325,7 +451,19 @@ export default function CompanyMap({ family = "sales", seedCompany = "", roleTit
 
       {/* Designations, last: the org shape once you know who and what level */}
       <div className="maplayout">
-        <ul className="tree"><Node node={tree} /></ul>
+        <div>
+          <ul className="tree"><Node node={tree} /></ul>
+          {people.length > 0 ? (
+            <Coverage parts={[
+              `${people.length} profile${people.length === 1 ? "" : "s"} sampled`,
+              people.length >= MAP_CAP ? `capped at ${MAP_CAP} — the company has more` : "",
+              `searched ${Math.min(10, fam.titles.length)} ${fam.label} titles in India`,
+              "a sample of public profiles, not a headcount or a reporting line",
+            ]} />
+          ) : (
+            <Coverage parts={["generic ladder from the role taxonomy", "no company data — nothing here describes this company"]} />
+          )}
+        </div>
         <div className="levels">
           {tierCounts.length > 0 && (
             <>
