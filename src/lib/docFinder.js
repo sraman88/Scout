@@ -20,7 +20,7 @@
 // result: a SERP call per profile would multiply the Apify bill by the size of
 // the result set for documents most candidates don't have.
 // -----------------------------------------------------------------------------
-import { searchGoogleResults } from "./apifySearch.js";
+import { searchWeb } from "./serp.js";
 
 export const DOC_TYPES = {
   pdf: { label: "PDF", ext: ["pdf"] },
@@ -148,15 +148,13 @@ export function scoreDoc({ url = "", title = "", snippet = "" }, { name, org = "
 
 export const confidenceLabel = (c) => (c >= 0.8 ? "strong" : c >= 0.65 ? "likely" : "possible");
 
-/* The default SERP is the Apify Google actor the rest of the app already uses,
-   so this needs no extra key. `serpFetch` stays injectable for tests and for
-   swapping in another SERP source. */
-const apifySerp = async (query) => {
-  const rows = await searchGoogleResults({ query, maxResults: 15 });
-  return rows.map((r) => ({ url: r.profile_url, title: r.name, snippet: r.bio }));
-};
+/* Goes through lib/serp.js, so a CV lookup works on whichever backend the user
+   has — Brave, a self-hosted SearXNG, the keyless engines, or Apify. It used to
+   call the Apify actor directly, which meant no token, no CV search.
+   `serpFetch` stays injectable for tests and for swapping in another source. */
+const defaultSerp = async (query) => (await searchWeb(query, { count: 15 })).rows;
 
-export async function findCandidateDocs(name, ctx = {}, { serpFetch = apifySerp } = {}) {
+export async function findCandidateDocs(name, ctx = {}, { serpFetch = defaultSerp } = {}) {
   if (!name || typeof serpFetch !== "function") return [];
   const results = await serpFetch(buildDocQuery(name, ctx));
   const seen = new Set();

@@ -1,26 +1,30 @@
 import { getStoredKey } from "../lib/storage.js";
 import { buildXRayQuery } from "../lib/social.js";
+import { availableBackends } from "../lib/serp.js";
 
-/* Says plainly which sources are live and which need a key.
+/* Says plainly which sources are live and what each one is running on.
 
-   LinkedIn and Google both run through Apify, so with only an LLM key the feed
-   is GitHub-only and silently looks broken ("I don't see linkedin at all").
-   The X-ray links below are the free fallback: the same boolean, opened in
-   Google, no token required. */
-const NEEDS_APIFY = "Needs an Apify token";
+   Nothing here needs a key any more: the LinkedIn X-ray runs on every search,
+   web search falls through Brave -> SearXNG -> keyless engines -> Apify, and
+   the free technical sources need nothing at all. A token still raises yield,
+   so the notes say what each source is currently using rather than warning
+   about what is missing. */
 
 export default function SourceStatus({ spec, family }) {
   const hasApify = !!getStoredKey("apify");
   const hasGithub = !!getStoredKey("github");
   const technical = family === "engineering" || family === "techsupport";
 
+  /* The first available backend is the one a web search will actually use. */
+  const backend = availableBackends()[0];
+
   const rows = [
-    hasApify
-      ? { id: "linkedin", label: "LinkedIn", live: true, note: "live · Apify actor" }
-      : { id: "linkedin", label: "LinkedIn X-ray", live: true, note: "live · keyless, lower yield" },
-    { id: "google", label: "Google", live: hasApify, note: hasApify ? "live" : NEEDS_APIFY },
+    { id: "linkedin", label: "LinkedIn", live: true,
+      note: hasApify ? "live · X-ray + Apify actor" : "live · keyless X-ray, lower yield" },
+    { id: "web", label: "Web search", live: true, note: `live · ${backend.label}` },
     { id: "github", label: "GitHub", live: technical, note: technical ? (hasGithub ? "live" : "live · unauthenticated, low rate limit") : "not used for this role" },
     { id: "stackoverflow", label: "StackOverflow", live: technical, note: technical ? "live" : "not used for this role" },
+    { id: "free", label: "dev.to · HF · GitLab", live: technical, note: technical ? "live · keyless" : "not used for this role" },
   ];
 
   const titles = spec?.titles?.slice(0, 3).join(" ") || "";
@@ -44,7 +48,9 @@ export default function SourceStatus({ spec, family }) {
 
       {!hasApify && (
         <div className="ssxray">
-          <b>No Apify token — LinkedIn is searched via a keyless X-ray</b> (fewer results, no headshots). Add a token in Settings for full search, or widen the net manually:
+          <b>Running fully keyless.</b> LinkedIn is searched by X-ray across two engines, which returns fewer
+          results and no headshots than the paid actor. Add a Brave key or an Apify token in Settings to raise
+          yield — or widen the net by hand:
           <div className="xlinks">
             {xrays.map((x) => (
               <a key={x.label} href={`https://www.google.com/search?q=${encodeURIComponent(x.q)}`} target="_blank" rel="noreferrer">{x.label} ↗</a>
